@@ -7,7 +7,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Arial", "Inter", "Helvetica Neue", sans-serif;
+  --font-sans: Arial, Helvetica, sans-serif;
   --font-mono: "Consolas", "Monaco", monospace;
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -35,6 +35,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -55,7 +56,7 @@
 }
 
 :root {
-  --background: #F1F5F9;
+  --background: #F4F6F8;
   --foreground: #0F172A;
   --card: #FFFFFF;
   --card-foreground: #0F172A;
@@ -63,6 +64,7 @@
   --popover-foreground: #0F172A;
   --primary: #0284C7;
   --primary-foreground: #FFFFFF;
+  --primary-hover: #0369A1;
   --secondary: #E2E8F0;
   --secondary-foreground: #0F172A;
   --muted: #E2E8F0;
@@ -105,6 +107,7 @@
   --popover-foreground: #F8FAFC;
   --primary: #38BDF8;
   --primary-foreground: #0B1120;
+  --primary-hover: #7DD3FC;
   --secondary: #1E293B;
   --secondary-foreground: #F8FAFC;
   --muted: #1E293B;
@@ -146,5 +149,63 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /* Cursor de mãozinha em tudo que é interativo */
+  a[href],
+  button,
+  summary,
+  select,
+  [role="button"],
+  [role="link"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"],
+  [role="option"],
+  [role="checkbox"],
+  [role="radio"],
+  [role="switch"],
+  [role="combobox"],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="file"],
+  input[type="submit"],
+  input[type="button"],
+  input[type="reset"],
+  input[type="color"],
+  input[type="range"] {
+    cursor: pointer;
+  }
+
+  /* Elementos desabilitados indicam que não podem ser acionados */
+  :is(button, select, input, [role="button"], [role="tab"], [role="option"], [role="menuitem"], [role="checkbox"], [role="switch"], [role="combobox"]):is(:disabled, [aria-disabled="true"], [data-disabled]) {
+    cursor: not-allowed;
+  }
+}
+
+/* Barra de tempo das notificações (toastfy): esvazia até o fechamento e pausa ao passar o mouse */
+@keyframes toastfy-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.toastfy-progress {
+  animation-name: toastfy-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+[data-sonner-toaster]:hover .toastfy-progress {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toastfy-progress {
+    animation: none;
   }
 }

@@ -42,6 +42,7 @@ import {
   ChevronRight,
   Loader2,
 } from "lucide-react";
+import { toast } from "@/lib/notify";
 
 const proposalHelper = createColumnHelper<Proposal>();
 const contractHelper = createColumnHelper<Contract>();
@@ -62,6 +63,12 @@ export default function RelatoriosPage() {
         supabase.from("proposals").select("*, client:clients(*), user:profiles(*)").order("created_at", { ascending: false }),
         supabase.from("contracts").select("*, client:clients(*)").order("created_at", { ascending: false }),
       ]);
+      if (pRes.error || cRes.error) {
+        toast.error("Erro ao carregar os dados dos relatórios.", {
+          id: "carregar-relatorios",
+          description: "As tabelas podem estar incompletas. Recarregue a página.",
+        });
+      }
       setProposals((pRes.data ?? []) as Proposal[]);
       setContracts((cRes.data ?? []) as Contract[]);
       setLoading(false);
@@ -120,6 +127,19 @@ export default function RelatoriosPage() {
     initialState: { pagination: { pageSize: 20 } },
   });
 
+  const runExport = (type: "xlsx" | "csv", opts: Parameters<typeof exportToXlsx>[0]) => {
+    if (opts.rows.length === 0) {
+      toast.warning("Não há registros para exportar.", { description: "Ajuste a busca e tente novamente." });
+      return;
+    }
+    try {
+      if (type === "xlsx") exportToXlsx(opts);
+      else exportToCsv(opts);
+    } catch {
+      toast.error(`Erro ao gerar o arquivo ${type.toUpperCase()}.`, { description: "Tente novamente." });
+    }
+  };
+
   const exportProposals = (type: "xlsx" | "csv") => {
     const filtered = proposalTable.getFilteredRowModel().rows;
     const headers = ["Título", "Cliente", "Status", "Tipo", "Implantação", "Recorrente", "Validade"];
@@ -133,7 +153,7 @@ export default function RelatoriosPage() {
       formatDate(r.original.valid_until),
     ]);
     const opts = { filename: "propostas", sheetName: "Propostas", headers, rows };
-    type === "xlsx" ? exportToXlsx(opts) : exportToCsv(opts);
+    runExport(type, opts);
   };
 
   const exportContracts = (type: "xlsx" | "csv") => {
@@ -148,7 +168,7 @@ export default function RelatoriosPage() {
       Number(r.original.monthly_amount),
     ]);
     const opts = { filename: "contratos", sheetName: "Contratos", headers, rows };
-    type === "xlsx" ? exportToXlsx(opts) : exportToCsv(opts);
+    runExport(type, opts);
   };
 
   if (loading) {

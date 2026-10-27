@@ -1,228 +1,300 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { hasPermission } from "@/lib/permissions";
-import { createTaskAction, updateTaskAction } from "@/services/tasks";
-import { createBoardAction, archiveBoardAction, updateColumnWipLimitAction } from "@/services/boards";
-import { KanbanBoard } from "@/components/kanban/kanban-board";
+import { createTaskAction, deleteTaskAction, moveTasksAction, updateTaskAction } from "@/services/tasks";
+import { archiveBoardAction, createBoardAction, updateBoardAction } from "@/services/boards";
+import { KanbanBoard, type BoardColumn } from "@/components/kanban/kanban-board";
 import { KanbanMetrics } from "@/components/kanban/kanban-metrics";
+import { BoardForm, WipLimitsForm } from "@/components/kanban/board-forms";
 import { TaskForm } from "@/components/forms/task-form";
-import type { Task, KanbanBoard as KanbanBoardType, KanbanColumn as KanbanColumnType } from "@/types/database";
-import type { TaskFormData } from "@/lib/validations/schemas";
+import {
+  DEFAULT_COLUMNS,
+  NO_LANE,
+  SWIMLANE_OPTIONS,
+  buildLanes,
+
+  type SwimlaneMode,
+} from "@/lib/kanban";
+import { PRIORITY_OPTIONS } from "@/lib/utils";
+import type {
+  Task,
+  Profile,
+  TaskColumnStatus,
+  KanbanBoard as KanbanBoardType,
+  KanbanColumn as KanbanColumnType,
+} from "@/types/database";
+import type { TaskFormData, TaskMove } from "@/lib/validations/schemas";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Plus,
-  Search,
-  Loader2,
-  LayoutGrid,
-  BarChart3,
-  Settings2,
-  Archive,
-} from "lucide-react";
-import { toast } from "sonner";
+import { OptionSelect } from "@/components/ui/option-select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Plus, Search, Loader2, LayoutGrid, BarChart3, Gauge, Archive, Pencil, KanbanSquare } from "lucide-react";
+import { toast } from "@/lib/notify";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
-type SwimlaneMode = "none" | "priority" | "assignee";
+const TASK_SELECT = "*, contract:contracts(*, client:clients(*)), assignee:profiles(*)";
+const STORAGE_BOARD = "pdvtec-kanban-board";
+const STORAGE_LANES = "pdvtec-kanban-swimlanes";
+
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Armazenamento indisponível (modo privado); preferência não é persistida
+  }
+}
+
+type NewTaskPreset = Partial<TaskFormData> | null;
 
 export default function TarefasPage() {
   const { profile } = useAuth();
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const confirm = useConfirm();
   const [boards, setBoards] = useState<KanbanBoardType[]>([]);
+  const [boardsLoaded, setBoardsLoaded] = useState(false);
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  // Quadro cujas tarefas estão carregadas; enquanto difere do selecionado, exibe carregamento
+  const [loadedBoardId, setLoadedBoardId] = useState<string | null>(null);
+
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
-  const [swimlaneMode, setSwimlaneMode] = useState<SwimlaneMode>("none");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [boardDialogOpen, setBoardDialogOpen] = useState(false);
-  const [newBoardTitle, setNewBoardTitle] = useState("");
-  const [newBoardDesc, setNewBoardDesc] = useState("");
-  const [wipDialogOpen, setWipDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("board");
+  const [swimlaneMode, setSwimlaneMode] = useState<SwimlaneMode>(() => {
+    const stored = readStorage(STORAGE_LANES);
+    return SWIMLANE_OPTIONS.find((o) => o.value === stored)?.value ?? "none";
+  });
 
-  const canCreate = profile ? hasPermission(profile.role, "tasks:create") : false;
+  const [newTaskPreset, setNewTaskPreset] = useState<NewTaskPreset>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [boardDialog, setBoardDialog] = useState<"create" | "edit" | null>(null);
+  const [wipDialogOpen, setWipDialogOpen] = useState(false);
+
+  // Fila que serializa a persistência dos movimentos otimistas
+  const persistQueue = useRef<Promise<unknown>>(Promise.resolve());
+
+  const role = profile?.role;
+  const canEdit = role ? hasPermission(role, "tasks:edit") : false;
+  const canCreate = role ? hasPermission(role, "tasks:create") : false;
+  const canDelete = role ? hasPermission(role, "tasks:delete") : false;
+
+  const selectedBoard = boards.find((b) => b.id === selectedBoardId) ?? null;
+
+  const columns: BoardColumn[] = useMemo(() => {
+    const source = selectedBoard?.columns?.length
+      ? selectedBoard.columns.map((c) => ({ slug: c.slug as TaskColumnStatus, title: c.title, wipLimit: c.wip_limit }))
+      : DEFAULT_COLUMNS.map((c) => ({ ...c, wipLimit: null }));
+    return source;
+  }, [selectedBoard]);
 
   const fetchBoards = useCallback(async () => {
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("kanban_boards")
       .select("*, columns:kanban_columns(*)")
       .eq("archived", false)
       .order("created_at", { ascending: true });
 
+    if (error) toast.error("Erro ao carregar os quadros.");
+
     const sorted = (data ?? []).map((b) => ({
       ...b,
-      columns: ((b.columns ?? []) as KanbanColumnType[]).sort(
-        (a: KanbanColumnType, b: KanbanColumnType) => a.position - b.position
-      ),
+      columns: ((b.columns ?? []) as KanbanColumnType[]).sort((a, c) => a.position - c.position),
     })) as KanbanBoardType[];
 
     setBoards(sorted);
-    if (!selectedBoardId && sorted.length > 0) {
-      setSelectedBoardId(sorted[0].id);
-    }
-  }, [selectedBoardId]);
+    setBoardsLoaded(true);
+    setSelectedBoardId((current) => {
+      if (current && sorted.some((b) => b.id === current)) return current;
+      const stored = readStorage(STORAGE_BOARD);
+      return sorted.find((b) => b.id === stored)?.id ?? sorted[0]?.id ?? null;
+    });
+  }, []);
 
-  const fetchTasks = useCallback(async () => {
-    setLoading(true);
+  const fetchTasks = useCallback(async (boardId: string) => {
     const supabase = createClient();
-
-    let query = supabase
-      .from("tasks")
-      .select("*, contract:contracts(*, client:clients(*)), assignee:profiles(*)")
-      .order("position");
-
-    if (selectedBoardId) {
-      query = query.eq("board_id", selectedBoardId);
-    }
-
-    const { data } = await query;
+    const { data, error } = await supabase.from("tasks").select(TASK_SELECT).eq("board_id", boardId).order("position");
+    if (error) toast.error("Erro ao carregar as tarefas.");
     setTasks((data ?? []) as Task[]);
-    setLoading(false);
-  }, [selectedBoardId]);
+    setLoadedBoardId(boardId);
+  }, []);
 
   useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from("profiles")
+      .select("*")
+      .order("full_name")
+      .then(({ data, error }) => {
+        if (error) toast.error("Erro ao carregar a lista de colaboradores.", { id: "carregar-colaboradores" });
+        setProfiles((data ?? []) as Profile[]);
+      });
+  }, []);
+
+  useEffect(() => {
+    // Carregamento inicial dos quadros (todos os setState ocorrem após o await)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBoards();
   }, [fetchBoards]);
 
   useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
+    if (!selectedBoardId) return;
+    writeStorage(STORAGE_BOARD, selectedBoardId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchTasks(selectedBoardId);
+  }, [selectedBoardId, fetchTasks]);
 
-  const filteredTasks = useMemo(() => {
-    let result = tasks;
-    if (search) {
-      result = result.filter((t) =>
-        t.title.toLowerCase().includes(search.toLowerCase())
-      );
-    }
-    if (priorityFilter !== "all") {
-      result = result.filter((t) => t.priority === priorityFilter);
-    }
-    if (assigneeFilter !== "all") {
-      if (assigneeFilter === "unassigned") {
-        result = result.filter((t) => !t.assigned_to);
-      } else {
-        result = result.filter((t) => t.assigned_to === assigneeFilter);
+  const loadingTasks = !!selectedBoardId && loadedBoardId !== selectedBoardId;
+
+  const isVisible = useCallback(
+    (t: Task) => {
+      if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false;
+      if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
+      if (assigneeFilter === NO_LANE) return !t.assigned_to;
+      if (assigneeFilter !== "all" && t.assigned_to !== assigneeFilter) return false;
+      return true;
+    },
+    [search, priorityFilter, assigneeFilter]
+  );
+
+  const lanes = useMemo(() => buildLanes(swimlaneMode, tasks, profiles), [swimlaneMode, tasks, profiles]);
+
+  // Ao trocar de raia, atualiza também os objetos relacionados exibidos no cartão
+  const resolveLanePatch = useCallback(
+    (laneKey: string): Partial<Task> => {
+      if (swimlaneMode === "assignee") {
+        return { assignee: laneKey === NO_LANE ? undefined : profiles.find((p) => p.id === laneKey) };
       }
-    }
-    return result;
-  }, [tasks, search, priorityFilter, assigneeFilter]);
-
-  const uniqueAssignees = useMemo(() => Array.from(
-    new Map(
-      tasks
-        .filter((t) => t.assignee)
-        .map((t) => [t.assignee!.id, t.assignee!])
-    ).values()
-  ), [tasks]);
-
-  const selectedBoard = boards.find((b) => b.id === selectedBoardId);
-
-  const swimlaneGroups = useMemo(() => {
-    if (swimlaneMode === "none") return [{ key: "all", label: "Todas", tasks: filteredTasks }];
-
-    if (swimlaneMode === "priority") {
-      const priorities = ["urgent", "high", "medium", "low"] as const;
-      const labels: Record<string, string> = { urgent: "Urgente", high: "Alta", medium: "Média", low: "Baixa" };
-      return priorities
-        .map((p) => ({
-          key: p,
-          label: labels[p],
-          tasks: filteredTasks.filter((t) => t.priority === p),
-        }))
-        .filter((g) => g.tasks.length > 0);
-    }
-
-    if (swimlaneMode === "assignee") {
-      const groups: { key: string; label: string; tasks: Task[] }[] = [];
-      const byAssignee = new Map<string, Task[]>();
-
-      for (const t of filteredTasks) {
-        const key = t.assigned_to ?? "unassigned";
-        if (!byAssignee.has(key)) byAssignee.set(key, []);
-        byAssignee.get(key)!.push(t);
+      if (swimlaneMode === "contract") {
+        return { contract: laneKey === NO_LANE ? undefined : tasks.find((t) => t.contract_id === laneKey)?.contract };
       }
+      return {};
+    },
+    [swimlaneMode, profiles, tasks]
+  );
 
-      for (const [key, tasks] of byAssignee) {
-        const label = key === "unassigned"
-          ? "Não Atribuído"
-          : tasks[0]?.assignee?.full_name ?? "Desconhecido";
-        groups.push({ key, label, tasks });
-      }
+  /** UI otimista: aplica o novo estado na hora e persiste em segundo plano */
+  const handleMove = useCallback(
+    (next: Task[], changes: TaskMove[], movedTaskId: string) => {
+      setTasks(next);
+      const boardId = selectedBoardId;
+      persistQueue.current = persistQueue.current.then(async () => {
+        // Nunca deixa a fila rejeitada: uma falha não pode impedir os próximos movimentos de salvar
+        let failure: string | null = null;
+        try {
+          const result = await moveTasksAction({ board_id: boardId, moved_task_id: movedTaskId, changes });
+          failure = result.error ?? null;
+        } catch {
+          failure = "Não foi possível salvar o movimento. Verifique sua conexão.";
+        }
+        if (failure) {
+          toast.error(failure, { description: "O quadro foi recarregado com os dados do servidor." });
+          if (boardId) await fetchTasks(boardId).catch(() => undefined);
+        }
+      });
+    },
+    [selectedBoardId, fetchTasks]
+  );
 
-      return groups.sort((a, b) => a.label.localeCompare(b.label));
-    }
-
-    return [{ key: "all", label: "Todas", tasks: filteredTasks }];
-  }, [filteredTasks, swimlaneMode]);
-
-  const handleCreate = async (data: TaskFormData) => {
-    const payload = { ...data, board_id: selectedBoardId } as TaskFormData & { board_id: string | null };
-    const result = await createTaskAction(payload);
+  const handleCreateTask = async (data: TaskFormData) => {
+    const result = await createTaskAction({ ...data, board_id: selectedBoardId });
     if (result.error) return { error: result.error };
+    setTasks((prev) => [...prev, result.data as Task]);
     toast.success("Tarefa criada!");
-    setDialogOpen(false);
-    fetchTasks();
+    setNewTaskPreset(null);
     return {};
   };
 
-  const handleUpdate = async (data: TaskFormData) => {
+  const handleUpdateTask = async (data: TaskFormData) => {
     if (!editingTask) return { error: "Erro interno." };
     const result = await updateTaskAction(editingTask.id, data);
     if (result.error) return { error: result.error };
+    setTasks((prev) => prev.map((t) => (t.id === editingTask.id ? (result.data as Task) : t)));
     toast.success("Tarefa atualizada!");
     setEditingTask(null);
-    fetchTasks();
     return {};
   };
 
-  const handleCreateBoard = async () => {
-    if (!newBoardTitle.trim()) {
-      toast.error("Título do quadro é obrigatório.");
-      return;
-    }
-    const result = await createBoardAction({
-      title: newBoardTitle.trim(),
-      description: newBoardDesc.trim() || null,
-    });
+  const deleteTask = async (task: Task) => {
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    const result = await deleteTaskAction(task.id);
     if (result.error) {
       toast.error(result.error);
+      if (selectedBoardId) fetchTasks(selectedBoardId);
       return;
     }
-    toast.success("Quadro criado!");
-    setNewBoardTitle("");
-    setNewBoardDesc("");
-    setBoardDialogOpen(false);
-    setSelectedBoardId(result.data ?? null);
-    fetchBoards();
+    toast.success("Tarefa excluída.");
   };
 
-  const handleArchiveBoard = async () => {
-    if (!selectedBoardId) return;
-    const result = await archiveBoardAction(selectedBoardId);
+  const handleDeleteTask = (task: Task) =>
+    confirm({
+      tone: "danger",
+      title: "Excluir tarefa?",
+      description: (
+        <>
+          <strong className="text-foreground">{task.title}</strong>
+          <br />
+          A tarefa será removida permanentemente. Esta ação não pode ser desfeita.
+        </>
+      ),
+      confirmLabel: "Excluir",
+      action: () => deleteTask(task),
+    });
+
+  const handleAddInColumn = useCallback((column: TaskColumnStatus) => {
+    setNewTaskPreset({ column_status: column });
+  }, []);
+
+  const handleSaveBoard = async (data: { title: string; description?: string | null }) => {
+    if (boardDialog === "edit" && selectedBoardId) {
+      const result = await updateBoardAction(selectedBoardId, data);
+      if (result.error) return { error: result.error };
+      toast.success("Quadro atualizado!");
+    } else {
+      const result = await createBoardAction(data);
+      if (result.error) return { error: result.error };
+      toast.success("Quadro criado!");
+      if (result.data) setSelectedBoardId(result.data);
+    }
+    setBoardDialog(null);
+    await fetchBoards();
+    return {};
+  };
+
+  const handleArchiveBoard = () => {
+    if (!selectedBoardId || !selectedBoard) return;
+    return confirm({
+      tone: "warning",
+      icon: Archive,
+      title: "Arquivar quadro?",
+      description: (
+        <>
+          <strong className="text-foreground">{selectedBoard.title}</strong>
+          <br />
+          O quadro deixará de aparecer na lista. As tarefas são preservadas.
+        </>
+      ),
+      confirmLabel: "Arquivar",
+      action: () => archiveBoard(selectedBoardId),
+    });
+  };
+
+  const archiveBoard = async (boardId: string) => {
+    const result = await archiveBoardAction(boardId);
     if (result.error) {
       toast.error(result.error);
       return;
@@ -232,7 +304,13 @@ export default function TarefasPage() {
     fetchBoards();
   };
 
-  if (loading && boards.length === 0) {
+  const columnCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of tasks) counts[t.column_status] = (counts[t.column_status] ?? 0) + 1;
+    return counts;
+  }, [tasks]);
+
+  if (!boardsLoaded) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -242,19 +320,45 @@ export default function TarefasPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Cabeçalho */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Tarefas</h1>
-          <p className="text-muted-foreground">Gerencie as tarefas operacionais</p>
+          <p className="text-muted-foreground">
+            {selectedBoard?.description || "Gerencie o fluxo de trabalho em quadros Kanban"}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setBoardDialogOpen(true)}>
+        <div className="flex flex-wrap items-center gap-2">
+          {boards.length > 0 && (
+            <OptionSelect
+              value={selectedBoardId}
+              onValueChange={setSelectedBoardId}
+              options={boards.map((b) => ({ value: b.id, label: b.title }))}
+              className="w-[220px]"
+              aria-label="Selecionar quadro"
+            />
+          )}
+          {selectedBoard && (
+            <>
+              <Button variant="outline" size="icon" onClick={() => setBoardDialog("edit")} aria-label="Editar quadro" title="Editar quadro">
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" onClick={() => setWipDialogOpen(true)} aria-label="Configurar limites WIP" title="Configurar limites WIP">
+                <Gauge className="h-4 w-4" />
+              </Button>
+              {boards.length > 1 && (
+                <Button variant="outline" size="icon" onClick={handleArchiveBoard} aria-label="Arquivar quadro" title="Arquivar quadro">
+                  <Archive className="h-4 w-4" />
+                </Button>
+              )}
+            </>
+          )}
+          <Button variant="outline" onClick={() => setBoardDialog("create")}>
             <Plus className="mr-2 h-4 w-4" />
             Novo Quadro
           </Button>
-          {canCreate && (
-            <Button onClick={() => setDialogOpen(true)}>
+          {canCreate && selectedBoard && (
+            <Button onClick={() => setNewTaskPreset({})}>
               <Plus className="mr-2 h-4 w-4" />
               Nova Tarefa
             </Button>
@@ -262,260 +366,190 @@ export default function TarefasPage() {
         </div>
       </div>
 
-      {/* Board selector */}
-      {boards.length > 1 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          {boards.map((board) => (
-            <Button
-              key={board.id}
-              variant={board.id === selectedBoardId ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedBoardId(board.id)}
-            >
-              <LayoutGrid className="mr-2 h-4 w-4" />
-              {board.title}
+      {!selectedBoard ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <KanbanSquare className="h-10 w-10 text-muted-foreground" />
+            <div>
+              <p className="font-medium">Nenhum quadro disponível</p>
+              <p className="text-sm text-muted-foreground">Crie um quadro para organizar as tarefas da equipe.</p>
+            </div>
+            <Button onClick={() => setBoardDialog("create")}>
+              <Plus className="mr-2 h-4 w-4" />
+              Criar Quadro
             </Button>
-          ))}
-          {selectedBoard && boards.length > 1 && (
-            <Button variant="ghost" size="sm" onClick={handleArchiveBoard} title="Arquivar quadro">
-              <Archive className="h-4 w-4 text-muted-foreground" />
-            </Button>
-          )}
-        </div>
-      )}
+          </CardContent>
+        </Card>
+      ) : (
+        <Tabs defaultValue="board">
+          <TabsList>
+            <TabsTrigger value="board" className="gap-2">
+              <LayoutGrid className="h-4 w-4" />
+              Quadro
+            </TabsTrigger>
+            <TabsTrigger value="metrics" className="gap-2">
+              <BarChart3 className="h-4 w-4" />
+              Métricas
+            </TabsTrigger>
+          </TabsList>
 
-      {/* Tabs: Quadro / Métricas */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="board" className="gap-2">
-            <LayoutGrid className="h-4 w-4" />
-            Quadro
-          </TabsTrigger>
-          <TabsTrigger value="metrics" className="gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Métricas
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="board" className="mt-4 space-y-4">
-          {/* Filters */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar tarefa..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+          <TabsContent value="board" className="mt-4 space-y-4">
+            {/* Filtros */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <div className="relative max-w-md flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar tarefa..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                  aria-label="Buscar tarefa"
+                />
+              </div>
+              <OptionSelect
+                value={priorityFilter}
+                onValueChange={setPriorityFilter}
+                className="sm:w-[170px]"
+                aria-label="Filtrar por prioridade"
+                options={[{ value: "all", label: "Todas as prioridades" }, ...PRIORITY_OPTIONS]}
+              />
+              <OptionSelect
+                value={assigneeFilter}
+                onValueChange={setAssigneeFilter}
+                className="sm:w-[190px]"
+                aria-label="Filtrar por responsável"
+                options={[
+                  { value: "all", label: "Todos os responsáveis" },
+                  { value: NO_LANE, label: "Sem responsável" },
+                  ...profiles.map((p) => ({ value: p.id, label: p.full_name })),
+                ]}
+              />
+              <OptionSelect
+                value={swimlaneMode}
+                onValueChange={(v) => {
+                  setSwimlaneMode(v as SwimlaneMode);
+                  writeStorage(STORAGE_LANES, v);
+                }}
+                className="sm:w-[210px]"
+                aria-label="Agrupar em raias"
+                options={SWIMLANE_OPTIONS}
               />
             </div>
-            <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v ?? "all")}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Prioridade</SelectItem>
-                <SelectItem value="low">Baixa</SelectItem>
-                <SelectItem value="medium">Média</SelectItem>
-                <SelectItem value="high">Alta</SelectItem>
-                <SelectItem value="urgent">Urgente</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={assigneeFilter} onValueChange={(v) => setAssigneeFilter(v ?? "all")}>
-              <SelectTrigger className="w-[170px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Responsável</SelectItem>
-                <SelectItem value="unassigned">Sem responsável</SelectItem>
-                {uniqueAssignees.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={swimlaneMode} onValueChange={(v) => setSwimlaneMode((v ?? "none") as SwimlaneMode)}>
-              <SelectTrigger className="w-[170px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Sem Raias</SelectItem>
-                <SelectItem value="priority">Raias: Prioridade</SelectItem>
-                <SelectItem value="assignee">Raias: Responsável</SelectItem>
-              </SelectContent>
-            </Select>
-            {selectedBoard && (
-              <Button variant="outline" size="icon" onClick={() => setWipDialogOpen(true)} title="Configurar WIP Limits">
-                <Settings2 className="h-4 w-4" />
-              </Button>
+
+            {loadingTasks ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <KanbanBoard
+                tasks={tasks}
+                isVisible={isVisible}
+                columns={columns}
+                lanes={lanes}
+                swimlaneMode={swimlaneMode}
+                canEdit={canEdit}
+                onMove={handleMove}
+                lanePatch={resolveLanePatch}
+                onEditTask={canEdit ? setEditingTask : undefined}
+                onDeleteTask={canDelete ? handleDeleteTask : undefined}
+                onAddTask={canCreate ? handleAddInColumn : undefined}
+              />
             )}
-          </div>
+            {canEdit && !loadingTasks && tasks.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Dica: arraste o cartão inteiro entre colunas e raias. Clique duas vezes para editar.
+              </p>
+            )}
+          </TabsContent>
 
-          {/* Board with swimlanes */}
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {swimlaneGroups.map((group) => (
-                <div key={group.key}>
-                  {swimlaneMode !== "none" && (
-                    <div className="mb-2 flex items-center gap-2">
-                      <Badge variant="outline" className="text-xs font-semibold">
-                        {group.label}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {group.tasks.length} tarefa(s)
-                      </span>
-                    </div>
-                  )}
-                  <KanbanBoard
-                    tasks={group.tasks}
-                    columns={selectedBoard?.columns}
-                    onTasksChange={fetchTasks}
-                    onEditTask={(task) => setEditingTask(task)}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent>
+          <TabsContent value="metrics" className="mt-4">
+            <KanbanMetrics tasks={tasks} columns={columns} />
+          </TabsContent>
+        </Tabs>
+      )}
 
-        <TabsContent value="metrics" className="mt-4">
-          <KanbanMetrics tasks={tasks} />
-        </TabsContent>
-      </Tabs>
-
-      {/* Dialog: Nova tarefa */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      {/* Nova tarefa */}
+      <Dialog open={!!newTaskPreset} onOpenChange={(open) => !open && setNewTaskPreset(null)}>
+        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nova Tarefa</DialogTitle>
+            {selectedBoard && <DialogDescription>Quadro: {selectedBoard.title}</DialogDescription>}
           </DialogHeader>
-          <TaskForm onSubmit={handleCreate} onCancel={() => setDialogOpen(false)} />
+          {newTaskPreset && (
+            <TaskForm
+              initialValues={newTaskPreset}
+              columns={columns}
+              onSubmit={handleCreateTask}
+              onCancel={() => setNewTaskPreset(null)}
+            />
+          )}
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Editar tarefa */}
-      <Dialog open={!!editingTask} onOpenChange={() => setEditingTask(null)}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      {/* Editar tarefa */}
+      <Dialog open={!!editingTask} onOpenChange={(open) => !open && setEditingTask(null)}>
+        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar Tarefa</DialogTitle>
           </DialogHeader>
           {editingTask && (
             <TaskForm
               defaultValues={editingTask}
-              onSubmit={handleUpdate}
+              columns={columns}
+              onSubmit={handleUpdateTask}
               onCancel={() => setEditingTask(null)}
             />
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Novo quadro */}
-      <Dialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen}>
+
+      {/* Criar / editar quadro */}
+      <Dialog open={!!boardDialog} onOpenChange={(open) => !open && setBoardDialog(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Novo Quadro Kanban</DialogTitle>
+            <DialogTitle>{boardDialog === "edit" ? "Editar Quadro" : "Novo Quadro Kanban"}</DialogTitle>
+            {boardDialog === "create" && (
+              <DialogDescription>
+                O quadro é criado com as colunas A Fazer, Em Andamento, Em Revisão e Concluído.
+              </DialogDescription>
+            )}
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="board-title">Título</Label>
-              <Input
-                id="board-title"
-                value={newBoardTitle}
-                onChange={(e) => setNewBoardTitle(e.target.value)}
-                placeholder="Ex.: Implantações PDV"
-              />
-            </div>
-            <div>
-              <Label htmlFor="board-desc">Descrição (opcional)</Label>
-              <Input
-                id="board-desc"
-                value={newBoardDesc}
-                onChange={(e) => setNewBoardDesc(e.target.value)}
-                placeholder="Descreva o propósito deste quadro"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setBoardDialogOpen(false)}>Cancelar</Button>
-              <Button onClick={handleCreateBoard}>Criar Quadro</Button>
-            </div>
-          </div>
+          {boardDialog && (
+            <BoardForm
+              key={boardDialog}
+              defaultValues={
+                boardDialog === "edit" && selectedBoard
+                  ? { title: selectedBoard.title, description: selectedBoard.description ?? "" }
+                  : undefined
+              }
+              onSubmit={handleSaveBoard}
+              onCancel={() => setBoardDialog(null)}
+            />
+          )}
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: WIP Limits */}
+
+      {/* Limites WIP */}
       <Dialog open={wipDialogOpen} onOpenChange={setWipDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Limites WIP — {selectedBoard?.title}</DialogTitle>
           </DialogHeader>
-          {selectedBoard?.columns && (
-            <WipLimitEditor
+          {wipDialogOpen && selectedBoard?.columns && (
+            <WipLimitsForm
               columns={selectedBoard.columns}
-              onSave={() => {
+              counts={columnCounts}
+              onSaved={() => {
                 setWipDialogOpen(false);
                 fetchBoards();
               }}
+              onCancel={() => setWipDialogOpen(false)}
             />
           )}
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function WipLimitEditor({
-  columns,
-  onSave,
-}: {
-  columns: KanbanColumnType[];
-  onSave: () => void;
-}) {
-  const [limits, setLimits] = useState<Record<string, string>>(
-    Object.fromEntries(columns.map((c) => [c.id, c.wip_limit?.toString() ?? ""]))
-  );
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
-    for (const col of columns) {
-      const raw = limits[col.id];
-      const wipLimit = raw === "" ? null : parseInt(raw, 10);
-      if (raw !== "" && (isNaN(wipLimit as number) || (wipLimit as number) < 1)) {
-        toast.error(`Limite inválido para "${col.title}". Use um número >= 1 ou deixe vazio.`);
-        setSaving(false);
-        return;
-      }
-      await updateColumnWipLimitAction(col.id, wipLimit);
-    }
-    toast.success("Limites WIP salvos!");
-    setSaving(false);
-    onSave();
-  };
-
-  return (
-    <div className="space-y-4">
-      {columns.map((col) => (
-        <div key={col.id} className="flex items-center gap-3">
-          <Label className="flex-1">{col.title}</Label>
-          <Input
-            type="number"
-            min="1"
-            className="w-24"
-            placeholder="Sem limite"
-            value={limits[col.id]}
-            onChange={(e) => setLimits((prev) => ({ ...prev, [col.id]: e.target.value }))}
-          />
-        </div>
-      ))}
-      <div className="flex justify-end gap-2">
-        <Button onClick={handleSave} disabled={saving}>
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Salvar
-        </Button>
-      </div>
     </div>
   );
 }

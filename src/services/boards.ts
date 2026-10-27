@@ -2,15 +2,16 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/audit";
+import {
+  boardSchema,
+  wipLimitsSchema,
+  type BoardFormData,
+  type WipLimitsFormData,
+} from "@/lib/validations/schemas";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-const boardSchema = z.object({
-  title: z.string().min(1, "Título é obrigatório").max(200),
-  description: z.string().max(1000).nullable().optional(),
-});
-
-export type BoardFormData = z.infer<typeof boardSchema>;
+const uuid = z.string().uuid();
 
 export async function getBoards(includeArchived = false) {
   const supabase = await createClient();
@@ -45,7 +46,7 @@ export async function createBoardAction(formData: BoardFormData) {
 
   const { data, error } = await supabase.rpc("create_default_board", {
     p_title: parsed.data.title,
-    p_description: parsed.data.description ?? null,
+    p_description: parsed.data.description || null,
     p_created_by: user?.id ?? null,
   });
 
@@ -62,7 +63,34 @@ export async function createBoardAction(formData: BoardFormData) {
   return { data: data as string };
 }
 
+export async function updateBoardAction(boardId: string, formData: BoardFormData) {
+  const parsed = boardSchema.safeParse(formData);
+  if (!parsed.success || !uuid.safeParse(boardId).success) {
+    return { error: parsed.error?.errors[0].message ?? "Quadro inválido." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("kanban_boards")
+    .update({ title: parsed.data.title, description: parsed.data.description || null })
+    .eq("id", boardId);
+
+  if (error) return { error: "Erro ao atualizar quadro." };
+
+  await logAudit({
+    action: "update",
+    tableName: "kanban_boards",
+    recordId: boardId,
+    details: { title: parsed.data.title },
+  });
+
+  revalidatePath("/tarefas");
+  return { success: true };
+}
+
 export async function archiveBoardAction(boardId: string) {
+  if (!uuid.safeParse(boardId).success) return { error: "Quadro inválido." };
+
   const supabase = await createClient();
 
   const { error } = await supabase
@@ -82,18 +110,18 @@ export async function archiveBoardAction(boardId: string) {
   return { success: true };
 }
 
-export async function updateColumnWipLimitAction(
-  columnId: string,
-  wipLimit: number | null
-) {
+export async function updateWipLimitsAction(formData: WipLimitsFormData) {
+  const parsed = wipLimitsSchema.safeParse(formData);
+  if (!parsed.success) return { error: parsed.error.errors[0].message };
+
   const supabase = await createClient();
+  const results = await Promise.all(
+    parsed.data.columns.map((col) =>
+      supabase.from("kanban_columns").update({ wip_limit: col.wip_limit }).eq("id", col.id)
+    )
+  );
 
-  const { error } = await supabase
-    .from("kanban_columns")
-    .update({ wip_limit: wipLimit })
-    .eq("id", columnId);
-
-  if (error) return { error: "Erro ao atualizar limite WIP." };
+  if (results.some((r) => r.error)) return { error: "Erro ao salvar limites WIP." };
 
   revalidatePath("/tarefas");
   return { success: true };

@@ -3,13 +3,14 @@
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { clientSchema, type ClientFormData } from "@/lib/validations/schemas";
-import { PatternFormat } from "react-number-format";
+import { validateCnpj } from "@/lib/validations/cnpj";
+import { CepInput, CnpjInput, FieldError, PhoneInput } from "./masked-inputs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Search } from "lucide-react";
 import { useState, useCallback } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import type { Client } from "@/types/database";
 
 interface ClientFormProps {
@@ -18,8 +19,20 @@ interface ClientFormProps {
   onCancel: () => void;
 }
 
+interface BrasilApiCnpj {
+  razao_social?: string;
+  nome_fantasia?: string;
+  cep?: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  municipio?: string;
+  uf?: string;
+  ddd_telefone_1?: string;
+  email?: string | null;
+}
+
 export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProps) {
-  const [loading, setLoading] = useState(false);
   const [cnpjLoading, setCnpjLoading] = useState(false);
 
   const {
@@ -28,7 +41,7 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
     handleSubmit,
     setValue,
     getValues,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<ClientFormData>({
     resolver: zodResolver(clientSchema),
     defaultValues: defaultValues
@@ -45,13 +58,29 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
           city: defaultValues.city,
           state: defaultValues.state,
         }
-      : undefined,
+      : {
+          corporate_name: "",
+          trade_name: "",
+          cnpj: "",
+          contact_name: "",
+          contact_email: "",
+          contact_phone: "",
+          zip_code: "",
+          street: "",
+          neighborhood: "",
+          city: "",
+          state: "",
+        },
   });
 
   const lookupCnpj = useCallback(async () => {
     const rawCnpj = getValues("cnpj")?.replace(/\D/g, "");
     if (!rawCnpj || rawCnpj.length !== 14) {
       toast.error("Digite os 14 dígitos do CNPJ.");
+      return;
+    }
+    if (!validateCnpj(rawCnpj)) {
+      toast.error("CNPJ inválido. Verifique os dígitos verificadores.");
       return;
     }
 
@@ -67,23 +96,29 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
 
       if (!res.ok) {
         if (res.status === 404) {
-          toast.warning("CNPJ não encontrado na base de dados.");
+          toast.warning("CNPJ não encontrado na base da Receita Federal.");
         } else {
           toast.error("Erro ao consultar CNPJ. Tente novamente.");
         }
         return;
       }
 
-      const data = await res.json();
+      const data: BrasilApiCnpj = await res.json();
 
-      const currentName = getValues("corporate_name");
-      if (!currentName) setValue("corporate_name", data.razao_social ?? "");
-      if (!getValues("trade_name")) setValue("trade_name", data.nome_fantasia ?? "");
-      if (!getValues("zip_code")) setValue("zip_code", data.cep ?? "");
-      if (!getValues("street")) setValue("street", data.logradouro ?? "");
-      if (!getValues("neighborhood")) setValue("neighborhood", data.bairro ?? "");
-      if (!getValues("city")) setValue("city", data.municipio ?? "");
-      if (!getValues("state")) setValue("state", data.uf ?? "");
+      // Preenche somente campos vazios, preservando o que o usuário já digitou
+      const fillIfEmpty = (field: keyof ClientFormData, value: string | null | undefined) => {
+        if (value && !getValues(field)) setValue(field, value, { shouldValidate: true, shouldDirty: true });
+      };
+
+      fillIfEmpty("corporate_name", data.razao_social);
+      fillIfEmpty("trade_name", data.nome_fantasia);
+      fillIfEmpty("zip_code", data.cep?.replace(/\D/g, ""));
+      fillIfEmpty("street", [data.logradouro, data.numero].filter(Boolean).join(", "));
+      fillIfEmpty("neighborhood", data.bairro);
+      fillIfEmpty("city", data.municipio);
+      fillIfEmpty("state", data.uf);
+      fillIfEmpty("contact_phone", data.ddd_telefone_1?.replace(/\D/g, ""));
+      fillIfEmpty("contact_email", data.email?.toLowerCase());
 
       toast.success("Dados do CNPJ preenchidos. Revise antes de salvar.");
     } catch (err) {
@@ -98,14 +133,14 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
   }, [getValues, setValue]);
 
   return (
-    <form onSubmit={handleSubmit(async (data) => {
-      setLoading(true);
-      const result = await onSubmit(data);
-      if (result?.error) {
-        toast.error(result.error);
-      }
-      setLoading(false);
-    })} className="space-y-4">
+    <form
+      noValidate
+      onSubmit={handleSubmit(async (data) => {
+        const result = await onSubmit(data);
+        if (result?.error) toast.error(result.error);
+      })}
+      className="space-y-4"
+    >
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <Label htmlFor="cnpj">CNPJ</Label>
@@ -114,45 +149,54 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
               name="cnpj"
               control={control}
               render={({ field }) => (
-                <PatternFormat
-                  format="##.###.###/####-##"
-                  mask="_"
-                  customInput={Input}
+                <CnpjInput
                   id="cnpj"
+                  name={field.name}
+                  getInputRef={field.ref}
                   value={field.value}
-                  onValueChange={(values) => field.onChange(values.value)}
+                  onValueChange={field.onChange}
+                  onBlur={field.onBlur}
                   aria-invalid={!!errors.cnpj}
                 />
               )}
             />
-            <Button type="button" variant="outline" size="icon" onClick={lookupCnpj} disabled={cnpjLoading} aria-label="Consultar CNPJ">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={lookupCnpj}
+              disabled={cnpjLoading}
+              aria-label="Consultar CNPJ na BrasilAPI"
+              title="Consultar CNPJ na BrasilAPI"
+            >
               {cnpjLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             </Button>
           </div>
-          {errors.cnpj && <p className="text-sm text-destructive mt-1">{errors.cnpj.message}</p>}
+          <FieldError message={errors.cnpj?.message} />
         </div>
 
         <div>
           <Label htmlFor="corporate_name">Razão Social</Label>
           <Input id="corporate_name" {...register("corporate_name")} aria-invalid={!!errors.corporate_name} />
-          {errors.corporate_name && <p className="text-sm text-destructive mt-1">{errors.corporate_name.message}</p>}
+          <FieldError message={errors.corporate_name?.message} />
         </div>
 
         <div>
           <Label htmlFor="trade_name">Nome Fantasia</Label>
           <Input id="trade_name" {...register("trade_name")} />
+          <FieldError message={errors.trade_name?.message} />
         </div>
 
         <div>
           <Label htmlFor="contact_name">Nome do Contato</Label>
           <Input id="contact_name" {...register("contact_name")} aria-invalid={!!errors.contact_name} />
-          {errors.contact_name && <p className="text-sm text-destructive mt-1">{errors.contact_name.message}</p>}
+          <FieldError message={errors.contact_name?.message} />
         </div>
 
         <div>
           <Label htmlFor="contact_email">E-mail</Label>
           <Input id="contact_email" type="email" {...register("contact_email")} aria-invalid={!!errors.contact_email} />
-          {errors.contact_email && <p className="text-sm text-destructive mt-1">{errors.contact_email.message}</p>}
+          <FieldError message={errors.contact_email?.message} />
         </div>
 
         <div>
@@ -161,18 +205,18 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
             name="contact_phone"
             control={control}
             render={({ field }) => (
-              <PatternFormat
-                format="(##) #####-####"
-                mask="_"
-                customInput={Input}
+              <PhoneInput
                 id="contact_phone"
+                name={field.name}
+                getInputRef={field.ref}
                 value={field.value}
-                onValueChange={(values) => field.onChange(values.value)}
+                onValueChange={field.onChange}
+                onBlur={field.onBlur}
                 aria-invalid={!!errors.contact_phone}
               />
             )}
           />
-          {errors.contact_phone && <p className="text-sm text-destructive mt-1">{errors.contact_phone.message}</p>}
+          <FieldError message={errors.contact_phone?.message} />
         </div>
 
         <div>
@@ -181,36 +225,48 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
             name="zip_code"
             control={control}
             render={({ field }) => (
-              <PatternFormat
-                format="#####-###"
-                mask="_"
-                customInput={Input}
+              <CepInput
                 id="zip_code"
-                value={field.value ?? ""}
-                onValueChange={(values) => field.onChange(values.value)}
+                name={field.name}
+                getInputRef={field.ref}
+                value={field.value}
+                onValueChange={field.onChange}
+                onBlur={field.onBlur}
+                aria-invalid={!!errors.zip_code}
               />
             )}
           />
+          <FieldError message={errors.zip_code?.message} />
         </div>
 
         <div className="sm:col-span-2">
           <Label htmlFor="street">Logradouro</Label>
           <Input id="street" {...register("street")} />
+          <FieldError message={errors.street?.message} />
         </div>
 
         <div>
           <Label htmlFor="neighborhood">Bairro</Label>
           <Input id="neighborhood" {...register("neighborhood")} />
+          <FieldError message={errors.neighborhood?.message} />
         </div>
 
         <div>
           <Label htmlFor="city">Cidade</Label>
           <Input id="city" {...register("city")} />
+          <FieldError message={errors.city?.message} />
         </div>
 
         <div>
           <Label htmlFor="state">UF</Label>
-          <Input id="state" maxLength={2} {...register("state")} />
+          <Input
+            id="state"
+            maxLength={2}
+            className="uppercase"
+            {...register("state", { setValueAs: (v: string | null) => v?.toUpperCase() ?? v })}
+            aria-invalid={!!errors.state}
+          />
+          <FieldError message={errors.state?.message} />
         </div>
       </div>
 
@@ -218,8 +274,8 @@ export function ClientForm({ defaultValues, onSubmit, onCancel }: ClientFormProp
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={loading}>
-          {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {defaultValues ? "Atualizar" : "Cadastrar"}
         </Button>
       </div>

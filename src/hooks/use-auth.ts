@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Profile } from "@/types/database";
 import type { User } from "@supabase/supabase-js";
+import { toast } from "@/lib/notify";
 
 interface AuthState {
   user: User | null;
@@ -21,11 +22,17 @@ export function useAuth() {
   const supabase = createClient();
 
   const fetchProfile = useCallback(async (userId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
       .single();
+    if (error) {
+      toast.error("Não foi possível carregar seu perfil.", {
+        id: "carregar-perfil",
+        description: "Verifique sua conexão e recarregue a página.",
+      });
+    }
     return data as Profile | null;
   }, [supabase]);
 
@@ -55,7 +62,11 @@ export function useAuth() {
   }, [supabase, fetchProfile]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error("Não foi possível encerrar a sessão.", { description: "Tente novamente." });
+      return;
+    }
     window.location.href = "/login";
   }, [supabase]);
 

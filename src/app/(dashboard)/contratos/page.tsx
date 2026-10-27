@@ -11,12 +11,11 @@ import {
   getSignedDocumentUrl,
 } from "@/services/contracts";
 import type { Contract, Client, Proposal } from "@/types/database";
-import type { ContractFormData } from "@/lib/validations/schemas";
-import { contractSchema } from "@/lib/validations/schemas";
+import { contractFormSchema, type ContractFormInput } from "@/lib/validations/schemas";
 import { formatCurrency, formatDate, getStatusLabel } from "@/lib/utils";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { NumericFormat } from "react-number-format";
+import { CurrencyInput, FieldError } from "@/components/forms/masked-inputs";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,13 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { OptionSelect } from "@/components/ui/option-select";
 import {
   Table,
   TableBody,
@@ -58,8 +51,11 @@ import {
   AlertTriangle,
   Upload,
   Loader2,
+  Ban,
+  RefreshCw,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 const statusColors: Record<string, string> = {
   active: "bg-success/10 text-success",
@@ -69,10 +65,10 @@ const statusColors: Record<string, string> = {
 };
 
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2D];
-const MAX_FILE_SIZE = 15 * 1024 * 1024;
 
 export default function ContratosPage() {
   const { profile } = useAuth();
+  const confirm = useConfirm();
   const searchParams = useSearchParams();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -80,8 +76,6 @@ export default function ContratosPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fromProposal = searchParams.get("from_proposal");
@@ -94,15 +88,25 @@ export default function ContratosPage() {
     control,
     handleSubmit,
     reset,
-    formState: { errors },
-  } = useForm<ContractFormData>({
-    resolver: zodResolver(contractSchema),
+    setValue,
+    setError,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<ContractFormInput>({
+    resolver: zodResolver(contractFormSchema),
     defaultValues: {
       client_id: fromClientId ?? "",
       proposal_id: fromProposal,
+      start_date: "",
+      end_date: "",
       monthly_amount: 0,
     },
   });
+
+  const selectedFile = watch("document");
+  const selectFile = (file: File | undefined) => {
+    if (file) setValue("document", file, { shouldValidate: true });
+  };
 
   useEffect(() => {
     if (fromProposal && fromClientId) {
@@ -126,7 +130,8 @@ export default function ContratosPage() {
       query = query.eq("status", statusFilter);
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) toast.error("Erro ao carregar os contratos.", { id: "carregar-contratos", description: "Tente novamente em instantes." });
     setContracts((data ?? []) as Contract[]);
     setLoading(false);
   }, [search, statusFilter]);
@@ -138,41 +143,24 @@ export default function ContratosPage() {
   useEffect(() => {
     const fetchClients = async () => {
       const supabase = createClient();
-      const { data } = await supabase.from("clients").select("*").order("corporate_name");
+      const { data, error } = await supabase.from("clients").select("*").order("corporate_name");
+      if (error) toast.error("Erro ao carregar a lista de clientes.", { id: "carregar-clientes" });
       setClients(data ?? []);
     };
     fetchClients();
   }, []);
 
-  const validateFile = async (file: File): Promise<boolean> => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error("Arquivo excede o limite de 15 MB.");
-      return false;
-    }
-    if (file.type !== "application/pdf") {
-      toast.error("Apenas arquivos PDF são permitidos.");
-      return false;
-    }
-    const buffer = await file.slice(0, 5).arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const isPdf = PDF_MAGIC.every((b, i) => bytes[i] === b);
-    if (!isPdf) {
-      toast.error("O arquivo não parece ser um PDF válido.");
-      return false;
-    }
-    return true;
+  // Tamanho e MIME são validados pelo Zod; aqui conferimos a assinatura binária %PDF-
+  const hasPdfSignature = async (file: File): Promise<boolean> => {
+    const bytes = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+    return PDF_MAGIC.every((b, i) => bytes[i] === b);
   };
 
-  const handleCreate = async (data: ContractFormData) => {
-    if (!selectedFile) {
-      toast.error("Selecione o arquivo PDF do contrato.");
+  const handleCreate = async ({ document: selectedFile, ...data }: ContractFormInput) => {
+    if (!(await hasPdfSignature(selectedFile))) {
+      setError("document", { message: "O arquivo não parece ser um PDF válido" });
       return;
     }
-
-    const valid = await validateFile(selectedFile);
-    if (!valid) return;
-
-    setUploading(true);
 
     const supabase = createClient();
     const storagePath = `contracts/${data.client_id}/${Date.now()}.pdf`;
@@ -186,12 +174,10 @@ export default function ContratosPage() {
 
     if (uploadError) {
       toast.error("Erro ao fazer upload do arquivo.");
-      setUploading(false);
       return;
     }
 
     const result = await createContractAction(data, storagePath);
-    setUploading(false);
 
     if (result.error) {
       toast.error(result.error);
@@ -200,7 +186,6 @@ export default function ContratosPage() {
 
     toast.success("Contrato registrado com sucesso!");
     setDialogOpen(false);
-    setSelectedFile(null);
     reset();
     fetchContracts();
   };
@@ -216,7 +201,30 @@ export default function ContratosPage() {
     }
   };
 
-  const handleStatusChange = async (id: string, newStatus: string) => {
+  const handleStatusChange = (contract: Contract, newStatus: "pending_renewal" | "cancelled") => {
+    const isCancel = newStatus === "cancelled";
+    return confirm({
+      tone: isCancel ? "danger" : "warning",
+      icon: isCancel ? Ban : RefreshCw,
+      title: isCancel ? "Cancelar contrato?" : "Marcar renovação pendente?",
+      description: (
+        <>
+          <strong className="text-foreground">
+            {contract.contract_number} — {contract.client?.corporate_name}
+          </strong>
+          <br />
+          {isCancel
+            ? "O contrato deixará de estar ativo. Esta ação não pode ser desfeita."
+            : "O contrato ficará sinalizado como aguardando renovação."}
+        </>
+      ),
+      confirmLabel: isCancel ? "Cancelar Contrato" : "Marcar Renovação",
+      cancelLabel: "Voltar",
+      action: () => applyStatusChange(contract.id, newStatus),
+    });
+  };
+
+  const applyStatusChange = async (id: string, newStatus: string) => {
     const result = await updateContractStatusAction(id, newStatus);
     if (result.error) {
       toast.error(result.error);
@@ -259,18 +267,19 @@ export default function ContratosPage() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os status</SelectItem>
-            <SelectItem value="active">Ativo</SelectItem>
-            <SelectItem value="pending_renewal">Renovação Pendente</SelectItem>
-            <SelectItem value="expired">Expirado</SelectItem>
-            <SelectItem value="cancelled">Cancelado</SelectItem>
-          </SelectContent>
-        </Select>
+        <OptionSelect
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+          className="sm:w-[200px]"
+          aria-label="Filtrar por status"
+          options={[
+            { value: "all", label: "Todos os status" },
+            { value: "active", label: "Ativo" },
+            { value: "pending_renewal", label: "Renovação Pendente" },
+            { value: "expired", label: "Expirado" },
+            { value: "cancelled", label: "Cancelado" },
+          ]}
+        />
       </div>
 
       <Card>
@@ -330,12 +339,14 @@ export default function ContratosPage() {
                               Baixar Contrato
                             </DropdownMenuItem>
                             {canCreate && contract.status === "active" && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_renewal")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(contract, "pending_renewal")}>
+                                <RefreshCw className="mr-2 h-4 w-4" />
                                 Renovação Pendente
                               </DropdownMenuItem>
                             )}
                             {canCreate && contract.status === "active" && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "cancelled")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(contract, "cancelled")}>
+                                <Ban className="mr-2 h-4 w-4" />
                                 Cancelar
                               </DropdownMenuItem>
                             )}
@@ -352,43 +363,41 @@ export default function ContratosPage() {
       </Card>
 
       {/* Create Contract Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setSelectedFile(null); reset(); } }}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) reset(); }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Registrar Contrato</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit(handleCreate)} className="space-y-4">
+          <form noValidate onSubmit={handleSubmit(handleCreate)} className="space-y-4">
             <div>
               <Label htmlFor="contract_client">Cliente</Label>
               <Controller
                 name="client_id"
                 control={control}
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clients.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.corporate_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <OptionSelect
+                    id="contract_client"
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    options={clients.map((c) => ({ value: c.id, label: c.corporate_name }))}
+                    placeholder="Selecione um cliente"
+                    aria-invalid={!!errors.client_id}
+                  />
                 )}
               />
-              {errors.client_id && <p className="text-sm text-destructive mt-1">{errors.client_id.message}</p>}
+              <FieldError message={errors.client_id?.message} />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="start_date">Data de Início</Label>
-                <Input id="start_date" type="date" {...register("start_date")} />
-                {errors.start_date && <p className="text-sm text-destructive mt-1">{errors.start_date.message}</p>}
+                <Input id="start_date" type="date" {...register("start_date")} aria-invalid={!!errors.start_date} />
+                <FieldError message={errors.start_date?.message} />
               </div>
               <div>
                 <Label htmlFor="end_date">Data de Término</Label>
-                <Input id="end_date" type="date" {...register("end_date")} />
-                {errors.end_date && <p className="text-sm text-destructive mt-1">{errors.end_date.message}</p>}
+                <Input id="end_date" type="date" {...register("end_date")} aria-invalid={!!errors.end_date} />
+                <FieldError message={errors.end_date?.message} />
               </div>
             </div>
 
@@ -398,31 +407,30 @@ export default function ContratosPage() {
                 name="monthly_amount"
                 control={control}
                 render={({ field }) => (
-                  <NumericFormat
-                    customInput={Input}
+                  <CurrencyInput
                     id="monthly_amount"
-                    thousandSeparator="."
-                    decimalSeparator=","
-                    decimalScale={2}
-                    fixedDecimalScale
-                    prefix="R$ "
+                    name={field.name}
+                    getInputRef={field.ref}
                     value={field.value}
-                    onValueChange={(values) => field.onChange(values.floatValue ?? 0)}
+                    onValueChange={(v) => field.onChange(v ?? 0)}
+                    onBlur={field.onBlur}
+                    aria-invalid={!!errors.monthly_amount}
                   />
                 )}
               />
+              <FieldError message={errors.monthly_amount?.message} />
             </div>
 
             <div>
               <Label>Documento PDF do Contrato</Label>
               <div
-                className="mt-2 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-6 cursor-pointer hover:border-primary/50 transition-colors"
+                className={`mt-2 flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 ${errors.document ? "border-destructive" : "border-border"} cursor-pointer hover:border-primary/50 transition-colors`}
                 onClick={() => fileInputRef.current?.click()}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
                   const file = e.dataTransfer.files[0];
-                  if (file) setSelectedFile(file);
+                  selectFile(file);
                 }}
                 role="button"
                 tabIndex={0}
@@ -442,18 +450,19 @@ export default function ContratosPage() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) setSelectedFile(file);
+                    selectFile(file);
                   }}
                 />
               </div>
+              <FieldError message={errors.document?.message} />
             </div>
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={uploading}>
-                {uploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Registrar Contrato
               </Button>
             </div>

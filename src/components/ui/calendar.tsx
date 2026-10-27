@@ -8,6 +8,7 @@ import {
   type DayButton,
   type Locale,
 } from "react-day-picker"
+import { ptBR } from "react-day-picker/locale"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "lucide-react"
@@ -18,7 +19,7 @@ function Calendar({
   showOutsideDays = true,
   captionLayout = "label",
   buttonVariant = "ghost",
-  locale,
+  locale = ptBR,
   formatters,
   components,
   ...props
@@ -184,7 +185,7 @@ function CalendarDayButton({
   className,
   day,
   modifiers,
-  locale,
+  locale = ptBR,
   ...props
 }: React.ComponentProps<typeof DayButton> & { locale?: Partial<Locale> }) {
   const defaultClassNames = getDefaultClassNames()

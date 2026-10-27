@@ -6,12 +6,13 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createClient } from "@/lib/supabase/client";
 import { loginSchema, type LoginFormData } from "@/lib/validations/schemas";
-import { LogoPDVTEC } from "@/components/logo-pdvtec";
+import { LogoPDVTEC } from "@/components/layout/logo-pdvtec";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import { toast } from "@/lib/notify";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,7 +38,13 @@ export default function LoginPage() {
     });
 
     if (authError) {
-      setError("E-mail ou senha inválidos.");
+      // Falha de rede (status 0) é diferente de credenciais incorretas
+      const message =
+        authError.status === 0 || /fetch/i.test(authError.message)
+          ? "Não foi possível conectar ao servidor. Verifique sua internet."
+          : "E-mail ou senha inválidos.";
+      setError(message);
+      toast.error(message, { id: "login" });
       setLoading(false);
       return;
     }
@@ -50,7 +57,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="flex flex-col items-center gap-4 pb-2">
-          <LogoPDVTEC />
+          <LogoPDVTEC className="w-[210px]" />
           <p className="text-sm text-muted-foreground">Acesse o sistema interno</p>
         </CardHeader>
         <CardContent>

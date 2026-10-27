@@ -13,9 +13,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Shield,
+  UserCog,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { LogoPDVTEC } from "@/components/logo-pdvtec";
+import { cn, getRoleLabel } from "@/lib/utils";
+import { LogoPDVTEC } from "@/components/layout/logo-pdvtec";
 import { canAccessModule } from "@/lib/permissions";
 import type { UserRole } from "@/types/database";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ const navItems = [
   { href: "/contratos", label: "Contratos", icon: FolderOpen, module: "contratos" },
   { href: "/tarefas", label: "Tarefas", icon: KanbanSquare, module: "tarefas" },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3, module: "relatorios" },
+  { href: "/admin/usuarios", label: "Usuários", icon: UserCog, module: "admin" },
   { href: "/configuracoes", label: "Configurações", icon: Settings, module: "configuracoes" },
 ];
 
@@ -44,12 +46,14 @@ export function Sidebar({ role }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-200",
+        "flex h-full min-h-0 flex-col border-r border-sidebar-border bg-sidebar transition-all duration-200",
         collapsed ? "w-16" : "w-64"
       )}
     >
       <div className="flex items-center justify-between p-4 border-b border-sidebar-border">
-        <LogoPDVTEC collapsed={collapsed} />
+        <Link href="/dashboard" aria-label="Ir para o Dashboard">
+          <LogoPDVTEC collapsed={collapsed} />
+        </Link>
         <Button
           variant="ghost"
           size="icon"
@@ -61,7 +65,7 @@ export function Sidebar({ role }: SidebarProps) {
         </Button>
       </div>
 
-      <nav className="flex-1 p-2 space-y-1" aria-label="Menu principal">
+      <nav className="flex-1 overflow-y-auto p-2 space-y-1" aria-label="Menu principal">
         {filteredItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
           return (
@@ -87,7 +91,7 @@ export function Sidebar({ role }: SidebarProps) {
         <div className="p-4 border-t border-sidebar-border">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Shield className="h-3 w-3" />
-            <span className="capitalize">{role}</span>
+            <span>{getRoleLabel(role)}</span>
           </div>
         </div>
       )}

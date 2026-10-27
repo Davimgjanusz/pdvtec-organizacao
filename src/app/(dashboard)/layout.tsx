@@ -5,7 +5,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Loader2 } from "lucide-react";
-import { Toaster } from "sonner";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { profile, loading, signOut } = useAuth();
@@ -39,7 +38,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Sidebar */}
       <div
-        className={`fixed inset-y-0 left-0 z-50 md:static md:z-auto transition-transform duration-200 ${
+        className={`fixed inset-y-0 left-0 z-50 h-full md:static md:z-auto transition-transform duration-200 ${
           mobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
@@ -58,7 +57,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </main>
       </div>
 
-      <Toaster position="top-right" richColors />
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { formatCurrency, getStatusLabel } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
+import { toast } from "@/lib/notify";
 
 interface DashboardStats {
   totalClients: number;
@@ -40,6 +41,13 @@ export default function DashboardPage() {
         supabase.from("contracts").select("status, end_date, monthly_amount"),
         supabase.from("tasks").select("column_status, priority"),
       ]);
+
+      if ([clientsRes, proposalsRes, contractsRes, tasksRes].some((r) => r.error)) {
+        toast.error("Alguns indicadores não puderam ser carregados.", {
+          id: "carregar-dashboard",
+          description: "Os números exibidos podem estar incompletos. Recarregue a página.",
+        });
+      }
 
       const proposalsByStatus: Record<string, number> = {};
       proposalsRes.data?.forEach((p) => {

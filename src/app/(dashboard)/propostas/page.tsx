@@ -31,13 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { OptionSelect } from "@/components/ui/option-select";
 import {
   Table,
   TableBody,
@@ -65,8 +59,9 @@ import {
   Loader2,
   AlertTriangle,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { useRouter } from "next/navigation";
+import { useConfirm, type ConfirmOptions } from "@/components/ui/confirm-dialog";
 
 const statusColors: Record<string, string> = {
   draft: "bg-secondary text-secondary-foreground",
@@ -79,6 +74,7 @@ const statusColors: Record<string, string> = {
 export default function PropostasPage() {
   const { profile } = useAuth();
   const router = useRouter();
+  const confirm = useConfirm();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -102,7 +98,8 @@ export default function PropostasPage() {
     if (search) query = query.ilike("title", `%${search}%`);
     if (statusFilter !== "all") query = query.eq("status", statusFilter);
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) toast.error("Erro ao carregar as propostas.", { id: "carregar-propostas", description: "Tente novamente em instantes." });
     setProposals((data ?? []) as Proposal[]);
     setLoading(false);
   }, [search, statusFilter]);
@@ -130,7 +127,54 @@ export default function PropostasPage() {
     return {};
   };
 
-  const handleStatusChange = async (id: string, newStatus: string) => {
+  const statusConfirmations: Record<string, Omit<ConfirmOptions, "action" | "description"> & { description: string }> = {
+    sent: {
+      tone: "info",
+      icon: Send,
+      title: "Marcar proposta como enviada?",
+      description: "Após o envio, a proposta não poderá mais ser editada.",
+      confirmLabel: "Marcar como Enviada",
+    },
+    approved: {
+      tone: "success",
+      icon: Check,
+      title: "Aprovar proposta?",
+      description: "A proposta será aprovada e você será levado ao registro do contrato.",
+      confirmLabel: "Aprovar",
+    },
+    rejected: {
+      tone: "danger",
+      icon: X,
+      title: "Recusar proposta?",
+      description: "A proposta será marcada como recusada pelo cliente. Esta ação não pode ser desfeita.",
+      confirmLabel: "Recusar",
+    },
+    cancelled: {
+      tone: "danger",
+      icon: Ban,
+      title: "Cancelar proposta?",
+      description: "A proposta será cancelada e não poderá mais ser enviada ou aprovada.",
+      confirmLabel: "Cancelar Proposta",
+    },
+  };
+
+  const handleStatusChange = (proposal: Proposal, newStatus: string) => {
+    const options = statusConfirmations[newStatus];
+    return confirm({
+      ...options,
+      description: (
+        <>
+          <strong className="text-foreground">{proposal.title}</strong>
+          <br />
+          {options.description}
+        </>
+      ),
+      cancelLabel: "Voltar",
+      action: () => applyStatusChange(proposal.id, newStatus),
+    });
+  };
+
+  const applyStatusChange = async (id: string, newStatus: string) => {
     const result = await changeProposalStatusAction(id, newStatus);
     if (result.error) {
       toast.error(result.error);
@@ -158,7 +202,7 @@ export default function PropostasPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      toast.error("Erro ao gerar PDF.");
+      toast.error("Erro ao gerar o PDF da proposta.", { description: "Tente novamente em instantes." });
     }
   };
 
@@ -191,19 +235,20 @@ export default function PropostasPage() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os status</SelectItem>
-            <SelectItem value="draft">Rascunho</SelectItem>
-            <SelectItem value="sent">Enviada</SelectItem>
-            <SelectItem value="approved">Aprovada</SelectItem>
-            <SelectItem value="rejected">Recusada</SelectItem>
-            <SelectItem value="cancelled">Cancelada</SelectItem>
-          </SelectContent>
-        </Select>
+        <OptionSelect
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+          className="sm:w-[200px]"
+          aria-label="Filtrar por status"
+          options={[
+            { value: "all", label: "Todos os status" },
+            { value: "draft", label: "Rascunho" },
+            { value: "sent", label: "Enviada" },
+            { value: "approved", label: "Aprovada" },
+            { value: "rejected", label: "Recusada" },
+            { value: "cancelled", label: "Cancelada" },
+          ]}
+        />
       </div>
 
       <Card>
@@ -279,25 +324,25 @@ export default function PropostasPage() {
                               </DropdownMenuItem>
                             )}
                             {canChangeStatus && proposal.status === "draft" && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(proposal.id, "sent")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(proposal, "sent")}>
                                 <Send className="mr-2 h-4 w-4" />
                                 Marcar como Enviada
                               </DropdownMenuItem>
                             )}
                             {canChangeStatus && proposal.status === "sent" && (
                               <>
-                                <DropdownMenuItem onClick={() => handleStatusChange(proposal.id, "approved")}>
+                                <DropdownMenuItem onClick={() => handleStatusChange(proposal, "approved")}>
                                   <Check className="mr-2 h-4 w-4" />
                                   Aprovar
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleStatusChange(proposal.id, "rejected")}>
+                                <DropdownMenuItem onClick={() => handleStatusChange(proposal, "rejected")}>
                                   <X className="mr-2 h-4 w-4" />
                                   Recusar
                                 </DropdownMenuItem>
                               </>
                             )}
                             {canChangeStatus && ["draft", "sent"].includes(proposal.status) && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(proposal.id, "cancelled")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(proposal, "cancelled")}>
                                 <Ban className="mr-2 h-4 w-4" />
                                 Cancelar
                               </DropdownMenuItem>

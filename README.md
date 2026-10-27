@@ -40,9 +40,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
 ```
 
-3. Execute a migration no **SQL Editor** do Supabase:
-   - Abra o arquivo `supabase/migrations/00001_initial_schema.sql`
-   - Cole e execute no SQL Editor do dashboard Supabase
+3. Execute as migrations, **em ordem**, no **SQL Editor** do Supabase:
+   - `supabase/migrations/00001_initial_schema.sql`
+   - `supabase/migrations/00002_kanban_boards.sql` (múltiplos quadros e limites WIP)
+   - `supabase/migrations/00003_kanban_evolution.sql` (vincula tarefas antigas a um quadro e prepara as métricas)
 
 Isso criará todas as tabelas, índices, triggers, políticas RLS, bucket de storage e funções auxiliares.
 
@@ -52,6 +53,7 @@ Isso criará todas as tabelas, índices, triggers, políticas RLS, bucket de sto
 2. Crie o usuário com e-mail e senha
 3. O trigger `on_auth_user_created` criará automaticamente o perfil com role `operacional`
 4. No **Table Editor → profiles**, altere o `role` do usuário para `admin`
+5. Os demais colaboradores podem ser cadastrados pelo próprio sistema em **Usuários** (`/admin/usuarios`), que exige `SUPABASE_SERVICE_ROLE_KEY` configurada no servidor
 
 ## Execução local
 
@@ -109,9 +111,10 @@ supabase/
 | **Clientes** | CRUD com consulta CNPJ via BrasilAPI, validação de dígitos verificadores |
 | **Propostas** | Criação, edição, pipeline (Rascunho → Enviada → Aprovada/Recusada), PDF |
 | **Contratos** | Registro a partir de proposta aprovada, upload de PDF, download com Signed URL (15 min) |
-| **Tarefas** | Kanban (A Fazer / Em Andamento / Em Revisão / Concluído) com drag-and-drop |
+| **Tarefas** | Kanban com múltiplos quadros, raias (prioridade, responsável, cliente/contrato), limites WIP, métricas (Lead Time, Cycle Time, Throughput) e arrasto com UI otimista |
 | **Relatórios** | Tabelas com busca, ordenação, paginação + exportação XLSX e CSV |
-| **Configurações** | Gestão de usuários/papéis (admin) + visualizador de audit logs |
+| **Usuários** | Cadastro de colaboradores (nome, e-mail, senha provisória, cargo) e alteração de cargo — somente admin |
+| **Configurações** | Visualizador de audit logs (admin) |
 
 ## Papéis
 

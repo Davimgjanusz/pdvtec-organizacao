@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ThemeToggle } from "./theme-toggle";
 import type { Profile } from "@/types/database";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 interface HeaderProps {
   profile: Profile | null;
@@ -13,6 +14,18 @@ interface HeaderProps {
 }
 
 export function Header({ profile, onSignOut, onMenuToggle }: HeaderProps) {
+  const confirm = useConfirm();
+
+  const handleSignOut = () =>
+    confirm({
+      tone: "warning",
+      icon: LogOut,
+      title: "Sair do sistema?",
+      description: "Sua sessão será encerrada e você precisará entrar novamente com e-mail e senha.",
+      confirmLabel: "Sair",
+      action: onSignOut,
+    });
+
   const initials = profile?.full_name
     ?.split(" ")
     .map((n) => n[0])
@@ -39,7 +52,7 @@ export function Header({ profile, onSignOut, onMenuToggle }: HeaderProps) {
           </Avatar>
           <span className="hidden text-sm font-medium md:block">{profile?.full_name}</span>
         </div>
-        <Button variant="ghost" size="icon" onClick={onSignOut} aria-label="Sair">
+        <Button variant="ghost" size="icon" onClick={handleSignOut} aria-label="Sair" title="Sair">
           <LogOut className="h-5 w-5" />
         </Button>
       </div>

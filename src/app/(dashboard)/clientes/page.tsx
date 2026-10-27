@@ -20,16 +20,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   Table,
   TableBody,
   TableCell,
@@ -38,16 +28,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Plus, Search, Pencil, Trash2, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function ClientesPage() {
   const { profile } = useAuth();
+  const confirm = useConfirm();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
-  const [deletingClient, setDeletingClient] = useState<Client | null>(null);
 
   const fetchClients = useCallback(async () => {
     setLoading(true);
@@ -61,7 +52,8 @@ export default function ClientesPage() {
       );
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) toast.error("Erro ao carregar os clientes.", { id: "carregar-clientes", description: "Tente novamente em instantes." });
     setClients(data ?? []);
     setLoading(false);
   }, [search]);
@@ -93,17 +85,28 @@ export default function ClientesPage() {
     return {};
   };
 
-  const handleDelete = async () => {
-    if (!deletingClient) return;
-    const result = await deleteClientAction(deletingClient.id);
-    if (result.error) {
-      toast.error(result.error);
-    } else {
-      toast.success("Cliente excluído.");
-      fetchClients();
-    }
-    setDeletingClient(null);
-  };
+  const handleDelete = (client: Client) =>
+    confirm({
+      tone: "danger",
+      title: "Excluir cliente?",
+      description: (
+        <>
+          <strong className="text-foreground">{client.corporate_name}</strong>
+          <br />
+          O cadastro será removido permanentemente. Esta ação não pode ser desfeita.
+        </>
+      ),
+      confirmLabel: "Excluir",
+      action: async () => {
+        const result = await deleteClientAction(client.id);
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.success("Cliente excluído.");
+          fetchClients();
+        }
+      },
+    });
 
   return (
     <div className="space-y-4">
@@ -171,7 +174,7 @@ export default function ClientesPage() {
                             </Button>
                           )}
                           {canDelete && (
-                            <Button variant="ghost" size="icon" onClick={() => setDeletingClient(client)} aria-label="Excluir cliente">
+                            <Button variant="ghost" size="icon" onClick={() => handleDelete(client)} aria-label="Excluir cliente">
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           )}
@@ -212,24 +215,6 @@ export default function ClientesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirmar exclusão */}
-      <AlertDialog open={!!deletingClient} onOpenChange={() => setDeletingClient(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tem certeza que deseja excluir o cliente &quot;{deletingClient?.corporate_name}&quot;?
-              Esta ação não pode ser desfeita.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

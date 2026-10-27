@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
+import "./date";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -62,4 +63,21 @@ export function getBillingTypeLabel(type: string): string {
     hybrid: "Híbrido",
   };
   return labels[type] ?? type;
+}
+
+export const PRIORITY_OPTIONS = [
+  { value: "low", label: "Baixa" },
+  { value: "medium", label: "Média" },
+  { value: "high", label: "Alta" },
+  { value: "urgent", label: "Urgente" },
+];
+
+export const ROLE_OPTIONS = [
+  { value: "admin", label: "Administrador" },
+  { value: "comercial", label: "Comercial" },
+  { value: "operacional", label: "Operacional" },
+];
+
+export function getRoleLabel(role: string): string {
+  return ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
 }

@@ -5,30 +5,31 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { taskSchema, type TaskFormData } from "@/lib/validations/schemas";
 import { createClient } from "@/lib/supabase/client";
-import type { Task, Profile, Contract } from "@/types/database";
+import { DEFAULT_COLUMNS } from "@/lib/kanban";
+import { PRIORITY_OPTIONS } from "@/lib/utils";
+import type { Task, Profile, Contract, TaskColumnStatus } from "@/types/database";
+import { FieldError } from "./masked-inputs";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { OptionSelect } from "@/components/ui/option-select";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
+
+const NONE = "__none__";
 
 interface TaskFormProps {
   defaultValues?: Task;
+  /** Valores iniciais de uma nova tarefa (ex.: coluna/raia de onde foi criada) */
+  initialValues?: Partial<TaskFormData>;
+  columns?: { slug: TaskColumnStatus; title: string }[];
   onSubmit: (data: TaskFormData) => Promise<{ error?: string }>;
   onCancel: () => void;
 }
 
-export function TaskForm({ defaultValues, onSubmit, onCancel }: TaskFormProps) {
-  const [loading, setLoading] = useState(false);
+export function TaskForm({ defaultValues, initialValues, columns = DEFAULT_COLUMNS, onSubmit, onCancel }: TaskFormProps) {
   const [users, setUsers] = useState<Profile[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
 
@@ -36,7 +37,7 @@ export function TaskForm({ defaultValues, onSubmit, onCancel }: TaskFormProps) {
     register,
     control,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<TaskFormData>({
     resolver: zodResolver(taskSchema),
     defaultValues: defaultValues
@@ -50,8 +51,14 @@ export function TaskForm({ defaultValues, onSubmit, onCancel }: TaskFormProps) {
           due_date: defaultValues.due_date,
         }
       : {
+          title: "",
+          description: "",
           column_status: "todo",
           priority: "medium",
+          assigned_to: null,
+          contract_id: null,
+          due_date: null,
+          ...initialValues,
         },
   });
 
@@ -60,102 +67,129 @@ export function TaskForm({ defaultValues, onSubmit, onCancel }: TaskFormProps) {
       const supabase = createClient();
       const [usersRes, contractsRes] = await Promise.all([
         supabase.from("profiles").select("*").order("full_name"),
-        supabase.from("contracts").select("*, client:clients(corporate_name)").eq("status", "active").order("contract_number"),
+        supabase
+          .from("contracts")
+          .select("*, client:clients(corporate_name)")
+          .in("status", ["active", "pending_renewal"])
+          .order("contract_number"),
       ]);
+      if (usersRes.error || contractsRes.error) {
+        toast.error("Erro ao carregar responsáveis ou contratos.", { id: "carregar-opcoes-tarefa" });
+      }
       setUsers(usersRes.data ?? []);
-      setContracts((contractsRes.data ?? []) as Contract[]);
+      const list = (contractsRes.data ?? []) as Contract[];
+      // Mantém o contrato atual da tarefa como opção mesmo que não esteja mais ativo
+      const current = defaultValues?.contract;
+      if (current && !list.some((c) => c.id === current.id)) list.unshift(current);
+      setContracts(list);
     };
     fetchData();
-  }, []);
+  }, [defaultValues?.contract]);
 
   return (
-    <form onSubmit={handleSubmit(async (data) => {
-      setLoading(true);
-      const result = await onSubmit(data as TaskFormData);
-      if (result?.error) toast.error(result.error);
-      setLoading(false);
-    })} className="space-y-4">
+    <form
+      noValidate
+      onSubmit={handleSubmit(async (data) => {
+        const result = await onSubmit({ ...data, due_date: data.due_date || null });
+        if (result?.error) toast.error(result.error);
+      })}
+      className="space-y-4"
+    >
       <div>
         <Label htmlFor="task_title">Título</Label>
         <Input id="task_title" {...register("title")} aria-invalid={!!errors.title} />
-        {errors.title && <p className="text-sm text-destructive mt-1">{errors.title.message}</p>}
+        <FieldError message={errors.title?.message} />
       </div>
 
       <div>
         <Label htmlFor="task_description">Descrição</Label>
-        <Textarea id="task_description" rows={3} {...register("description")} />
+        <Textarea id="task_description" rows={3} {...register("description")} aria-invalid={!!errors.description} />
+        <FieldError message={errors.description?.message} />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Prioridade</Label>
+          <Label htmlFor="task_column">Etapa</Label>
+          <Controller
+            name="column_status"
+            control={control}
+            render={({ field }) => (
+              <OptionSelect
+                id="task_column"
+                value={field.value}
+                onValueChange={field.onChange}
+                options={columns.map((c) => ({ value: c.slug, label: c.title }))}
+              />
+            )}
+          />
+          <FieldError message={errors.column_status?.message} />
+        </div>
+
+        <div>
+          <Label htmlFor="task_priority">Prioridade</Label>
           <Controller
             name="priority"
             control={control}
             render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Baixa</SelectItem>
-                  <SelectItem value="medium">Média</SelectItem>
-                  <SelectItem value="high">Alta</SelectItem>
-                  <SelectItem value="urgent">Urgente</SelectItem>
-                </SelectContent>
-              </Select>
+              <OptionSelect id="task_priority" value={field.value} onValueChange={field.onChange} options={PRIORITY_OPTIONS} />
             )}
           />
+          <FieldError message={errors.priority?.message} />
         </div>
 
         <div>
-          <Label htmlFor="task_due_date">Prazo</Label>
-          <Input id="task_due_date" type="date" {...register("due_date")} />
-        </div>
-
-        <div>
-          <Label>Responsável</Label>
+          <Label htmlFor="task_assignee">Responsável</Label>
           <Controller
             name="assigned_to"
             control={control}
             render={({ field }) => (
-              <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || null)}>
-                <SelectTrigger><SelectValue placeholder="Nenhum" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Nenhum</SelectItem>
-                  {users.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OptionSelect
+                id="task_assignee"
+                value={field.value ?? NONE}
+                onValueChange={(v) => field.onChange(v === NONE ? null : v)}
+                options={[{ value: NONE, label: "Nenhum" }, ...users.map((u) => ({ value: u.id, label: u.full_name }))]}
+              />
             )}
           />
+          <FieldError message={errors.assigned_to?.message} />
         </div>
 
         <div>
-          <Label>Contrato</Label>
+          <Label htmlFor="task_due_date">Prazo</Label>
+          <Input id="task_due_date" type="date" {...register("due_date")} aria-invalid={!!errors.due_date} />
+          <FieldError message={errors.due_date?.message} />
+        </div>
+
+        <div className="sm:col-span-2">
+          <Label htmlFor="task_contract">Cliente / Contrato</Label>
           <Controller
             name="contract_id"
             control={control}
             render={({ field }) => (
-              <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v || null)}>
-                <SelectTrigger><SelectValue placeholder="Nenhum" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Nenhum</SelectItem>
-                  {contracts.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.contract_number} — {(c.client as { corporate_name?: string })?.corporate_name ?? ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OptionSelect
+                id="task_contract"
+                value={field.value ?? NONE}
+                onValueChange={(v) => field.onChange(v === NONE ? null : v)}
+                options={[
+                  { value: NONE, label: "Nenhum" },
+                  ...contracts.map((c) => ({
+                    value: c.id,
+                    label: `${c.contract_number} — ${(c.client as { corporate_name?: string } | undefined)?.corporate_name ?? ""}`,
+                  })),
+                ]}
+              />
             )}
           />
+          <FieldError message={errors.contract_id?.message} />
         </div>
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button>
-        <Button type="submit" disabled={loading}>
-          {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancelar
+        </Button>
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {defaultValues ? "Atualizar" : "Criar Tarefa"}
         </Button>
       </div>
