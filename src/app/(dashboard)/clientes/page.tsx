@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { hasPermission } from "@/lib/permissions";
@@ -12,7 +12,7 @@ import type { ClientFormData } from "@/lib/validations/schemas";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -37,11 +37,13 @@ export default function ClientesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Incrementado para recarregar a lista após criar, editar ou excluir
+  const [reloadKey, setReloadKey] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
 
-  const fetchClients = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    let ignore = false;
     const supabase = createClient();
     let query = supabase.from("clients").select("*").order("corporate_name");
 
@@ -52,15 +54,17 @@ export default function ClientesPage() {
       );
     }
 
-    const { data, error } = await query;
-    if (error) toast.error("Erro ao carregar os clientes.", { id: "carregar-clientes", description: "Tente novamente em instantes." });
-    setClients(data ?? []);
-    setLoading(false);
-  }, [search]);
+    query.then(({ data, error }) => {
+      if (ignore) return;
+      if (error) toast.error("Erro ao carregar os clientes.", { id: "carregar-clientes", description: "Tente novamente em instantes." });
+      setClients(data ?? []);
+      setLoading(false);
+    });
 
-  useEffect(() => {
-    fetchClients();
-  }, [fetchClients]);
+    return () => {
+      ignore = true;
+    };
+  }, [search, reloadKey]);
 
   const canCreate = profile ? hasPermission(profile.role, "clients:create") : false;
   const canEdit = profile ? hasPermission(profile.role, "clients:edit") : false;
@@ -71,7 +75,7 @@ export default function ClientesPage() {
     if (result.error) return { error: result.error };
     toast.success("Cliente cadastrado com sucesso!");
     setDialogOpen(false);
-    fetchClients();
+    setReloadKey((k) => k + 1);
     return {};
   };
 
@@ -81,7 +85,7 @@ export default function ClientesPage() {
     if (result.error) return { error: result.error };
     toast.success("Cliente atualizado com sucesso!");
     setEditingClient(null);
-    fetchClients();
+    setReloadKey((k) => k + 1);
     return {};
   };
 
@@ -103,7 +107,7 @@ export default function ClientesPage() {
           toast.error(result.error);
         } else {
           toast.success("Cliente excluído.");
-          fetchClients();
+          setReloadKey((k) => k + 1);
         }
       },
     });
@@ -128,7 +132,7 @@ export default function ClientesPage() {
         <Input
           placeholder="Buscar por razão social, nome fantasia ou CNPJ..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setLoading(true); }}
           className="pl-9"
         />
       </div>

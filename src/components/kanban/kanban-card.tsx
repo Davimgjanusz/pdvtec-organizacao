@@ -4,6 +4,7 @@ import { memo, type HTMLAttributes, type Ref } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn, getPriorityLabel, formatDate } from "@/lib/utils";
+import { getColorTagOption } from "@/lib/kanban";
 import type { Task, TaskColumnStatus } from "@/types/database";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,7 @@ function KanbanCardView({
 }: CardViewProps) {
   const today = new Date().toISOString().slice(0, 10);
   const isOverdue = !!task.due_date && task.due_date < today && task.column_status !== "done";
+  const colorTag = getColorTagOption(task.color_tag);
 
   return (
     <div
@@ -96,13 +98,20 @@ function KanbanCardView({
         "group relative touch-manipulation select-none rounded-lg border bg-card p-3 pl-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.06)] outline-none transition-shadow",
         "before:absolute before:inset-y-2 before:left-1.5 before:w-1 before:rounded-full",
         priorityBar[task.priority],
-        !disabled && "cursor-pointer hover:border-primary/40 hover:shadow-md active:cursor-grabbing",
+        !disabled && "cursor-grab hover:border-primary/40 hover:shadow-md active:cursor-grabbing",
         "focus-visible:ring-3 focus-visible:ring-ring/50",
         isDragging && "opacity-40",
         isDragOverlay && "cursor-grabbing rotate-2 shadow-xl ring-2 ring-primary/30",
         isOverdue && "border-destructive/50"
       )}
     >
+      {colorTag.value !== "default" && (
+        <span
+          aria-hidden
+          title={`Etiqueta: ${colorTag.label}`}
+          className={cn("absolute inset-x-3 top-0 h-1 rounded-b-full", colorTag.swatch)}
+        />
+      )}
       <div className="flex items-start justify-between gap-1">
         <h4 className="text-sm font-medium leading-snug break-words">{task.title}</h4>
         {!isDragOverlay && (onEdit || onMove || onDelete) && (

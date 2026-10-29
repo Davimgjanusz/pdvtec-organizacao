@@ -5,8 +5,8 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { taskSchema, type TaskFormData } from "@/lib/validations/schemas";
 import { createClient } from "@/lib/supabase/client";
-import { DEFAULT_COLUMNS } from "@/lib/kanban";
-import { PRIORITY_OPTIONS } from "@/lib/utils";
+import { DEFAULT_COLUMNS, TASK_COLOR_OPTIONS } from "@/lib/kanban";
+import { PRIORITY_OPTIONS, cn } from "@/lib/utils";
 import type { Task, Profile, Contract, TaskColumnStatus } from "@/types/database";
 import { FieldError } from "./masked-inputs";
 
@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { OptionSelect } from "@/components/ui/option-select";
-import { Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { toast } from "@/lib/notify";
 
 const NONE = "__none__";
@@ -48,6 +48,7 @@ export function TaskForm({ defaultValues, initialValues, columns = DEFAULT_COLUM
           description: defaultValues.description,
           column_status: defaultValues.column_status,
           priority: defaultValues.priority,
+          color_tag: defaultValues.color_tag ?? "default",
           due_date: defaultValues.due_date,
         }
       : {
@@ -55,6 +56,7 @@ export function TaskForm({ defaultValues, initialValues, columns = DEFAULT_COLUM
           description: "",
           column_status: "todo",
           priority: "medium",
+          color_tag: "default",
           assigned_to: null,
           contract_id: null,
           due_date: null,
@@ -158,6 +160,40 @@ export function TaskForm({ defaultValues, initialValues, columns = DEFAULT_COLUM
           <Label htmlFor="task_due_date">Prazo</Label>
           <Input id="task_due_date" type="date" {...register("due_date")} aria-invalid={!!errors.due_date} />
           <FieldError message={errors.due_date?.message} />
+        </div>
+
+        <div className="sm:col-span-2">
+          <Label id="task_color_label">Etiqueta de cor</Label>
+          <Controller
+            name="color_tag"
+            control={control}
+            render={({ field }) => (
+              <div role="group" aria-labelledby="task_color_label" className="mt-1.5 flex flex-wrap gap-2">
+                {TASK_COLOR_OPTIONS.map((option) => {
+                  const selected = field.value === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={selected}
+                      aria-label={option.label}
+                      title={option.label}
+                      onClick={() => field.onChange(option.value)}
+                      className={cn(
+                        "flex h-7 w-7 items-center justify-center rounded-full border outline-none transition-shadow focus-visible:ring-3 focus-visible:ring-ring/50",
+                        option.swatch,
+                        option.value === "default" && "border-dashed text-muted-foreground",
+                        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+                      )}
+                    >
+                      {selected && <Check className={cn("h-3.5 w-3.5", option.value !== "default" && "text-white")} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          />
+          <FieldError message={errors.color_tag?.message} />
         </div>
 
         <div className="sm:col-span-2">

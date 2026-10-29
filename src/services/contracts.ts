@@ -1,7 +1,12 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { contractSchema, type ContractFormData } from "@/lib/validations/schemas";
+import {
+  contractSchema,
+  contractStatusChangeSchema,
+  storagePathSchema,
+  type ContractFormData,
+} from "@/lib/validations/schemas";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
 
@@ -85,6 +90,9 @@ export async function updateContractStatusAction(
   id: string,
   newStatus: string
 ) {
+  const parsed = contractStatusChangeSchema.safeParse({ id, status: newStatus });
+  if (!parsed.success) return { error: "Status de contrato inválido." };
+
   const supabase = await createClient();
 
   const { data: existing } = await supabase
@@ -114,6 +122,9 @@ export async function updateContractStatusAction(
 }
 
 export async function getSignedDocumentUrl(storagePath: string) {
+  const parsedPath = storagePathSchema.safeParse(storagePath);
+  if (!parsedPath.success) return { error: "Documento inválido." };
+
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -121,7 +132,7 @@ export async function getSignedDocumentUrl(storagePath: string) {
 
   const { data, error } = await supabase.storage
     .from("pdvtec-documents")
-    .createSignedUrl(storagePath, 900);
+    .createSignedUrl(parsedPath.data, 900);
 
   if (error || !data?.signedUrl) {
     return { error: "Não foi possível gerar o link temporário." };

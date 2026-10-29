@@ -1,4 +1,4 @@
-import type { Task, TaskColumnStatus, TaskPriority } from "@/types/database";
+import type { Task, TaskColorTag, TaskColumnStatus, TaskPriority } from "@/types/database";
 import type { TaskMove } from "@/lib/validations/schemas";
 import { getPriorityLabel } from "@/lib/utils";
 
@@ -17,6 +17,22 @@ export const DEFAULT_COLUMNS: { slug: TaskColumnStatus; title: string }[] = [
   { slug: "review", title: "Em Revisão" },
   { slug: "done", title: "Concluído" },
 ];
+
+/** Etiquetas de cor do cartão: rótulo acessível + classes da faixa superior e da amostra no formulário */
+export const TASK_COLOR_OPTIONS: { value: TaskColorTag; label: string; swatch: string }[] = [
+  { value: "default", label: "Sem cor", swatch: "bg-transparent" },
+  { value: "blue", label: "Azul", swatch: "bg-sky-500" },
+  { value: "green", label: "Verde", swatch: "bg-emerald-500" },
+  { value: "yellow", label: "Amarelo", swatch: "bg-yellow-400" },
+  { value: "orange", label: "Laranja", swatch: "bg-orange-500" },
+  { value: "red", label: "Vermelho", swatch: "bg-red-500" },
+  { value: "purple", label: "Roxo", swatch: "bg-violet-500" },
+  { value: "pink", label: "Rosa", swatch: "bg-pink-500" },
+];
+
+export function getColorTagOption(tag: TaskColorTag | null | undefined) {
+  return TASK_COLOR_OPTIONS.find((o) => o.value === tag) ?? TASK_COLOR_OPTIONS[0];
+}
 
 /** Chave da raia "vazia" (sem responsável / sem contrato) */
 export const NO_LANE = "__none__";

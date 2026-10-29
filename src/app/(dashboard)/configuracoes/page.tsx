@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuditLog } from "@/types/database";
@@ -84,8 +84,8 @@ function AuditPanel() {
   const [page, setPage] = useState(0);
   const pageSize = 25;
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    let ignore = false;
     const supabase = createClient();
     let query = supabase
       .from("audit_logs")
@@ -97,15 +97,17 @@ function AuditPanel() {
       query = query.or(`action.ilike.%${search}%,table_name.ilike.%${search}%`);
     }
 
-    const { data, error } = await query;
-    if (error) toast.error("Erro ao carregar os registros de auditoria.", { id: "carregar-auditoria" });
-    setLogs((data ?? []) as AuditLog[]);
-    setLoading(false);
-  }, [page, search]);
+    query.then(({ data, error }) => {
+      if (ignore) return;
+      if (error) toast.error("Erro ao carregar os registros de auditoria.", { id: "carregar-auditoria" });
+      setLogs((data ?? []) as AuditLog[]);
+      setLoading(false);
+    });
 
-  useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
+    return () => {
+      ignore = true;
+    };
+  }, [page, search]);
 
   return (
     <div className="space-y-4">
@@ -114,7 +116,7 @@ function AuditPanel() {
         <Input
           placeholder="Buscar por ação ou tabela..."
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+          onChange={(e) => { setSearch(e.target.value); setPage(0); setLoading(true); }}
           className="pl-9"
         />
       </div>
@@ -170,7 +172,7 @@ function AuditPanel() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
+          onClick={() => { setPage((p) => Math.max(0, p - 1)); setLoading(true); }}
           disabled={page === 0}
           aria-label="Página anterior"
         >
@@ -180,7 +182,7 @@ function AuditPanel() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => setPage((p) => p + 1)}
+          onClick={() => { setPage((p) => p + 1); setLoading(true); }}
           disabled={logs.length < pageSize}
           aria-label="Próxima página"
         >

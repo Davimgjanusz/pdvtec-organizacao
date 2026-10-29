@@ -1,25 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function ThemeToggle() {
-  const [dark, setDark] = useState(false);
+// O tema vive na classe "dark" do <html>, aplicada antes da hidratação pelo script do layout.
+// Ler essa classe por useSyncExternalStore evita copiar o tema para um estado dentro de um efeito.
+function subscribe(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
 
-  useEffect(() => {
-    const stored = localStorage.getItem("pdvtec-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const isDark = stored ? stored === "dark" : prefersDark;
-    setDark(isDark);
-    document.documentElement.classList.toggle("dark", isDark);
-  }, []);
+const isDarkOnClient = () => document.documentElement.classList.contains("dark");
+const isDarkOnServer = () => false;
+
+export function ThemeToggle() {
+  const dark = useSyncExternalStore(subscribe, isDarkOnClient, isDarkOnServer);
 
   const toggle = () => {
     const next = !dark;
-    setDark(next);
     document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("pdvtec-theme", next ? "dark" : "light");
+    try {
+      localStorage.setItem("pdvtec-theme", next ? "dark" : "light");
+    } catch {
+      // Armazenamento indisponível (modo privado); a preferência vale só nesta sessão
+    }
   };
 
   return (

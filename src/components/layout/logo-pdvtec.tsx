@@ -76,8 +76,33 @@ function Globe({ id, cx, cy, r }: GlobeProps) {
   );
 }
 
-/** Texto com sombra deslocada, contorno escuro e preenchimento sólido (sem áreas vazadas). */
-function Lettering({ d, fill, stroke, strokeWidth, offset }: {
+/** Área com sinal do subcaminho (shoelace sobre os pontos de ancoragem): positiva = contorno externo, negativa = miolo da letra. */
+function signedArea(subpath: string) {
+  const pts = [...subpath.matchAll(/(-?\d*\.?\d+) (-?\d*\.?\d+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return area;
+}
+
+/** Só os contornos externos dos glifos: a sombra não pode vazar para dentro dos miolos (P, D, A, o, e). */
+function outerContours(d: string) {
+  return d
+    .split(/(?=M)/)
+    .filter((sub) => signedArea(sub) > 0)
+    .join("");
+}
+
+/**
+ * Texto com sombra deslocada, contorno escuro e preenchimento sólido.
+ * A sombra é mascarada pela silhueta externa da letra: ela só aparece do lado de fora,
+ * então os miolos (P, D, A, o, a, e) mostram o fundo limpo, sem pontos manchados.
+ */
+function Lettering({ id, d, fill, stroke, strokeWidth, offset }: {
+  id: string;
   d: string;
   fill: string;
   stroke: string;
@@ -86,8 +111,25 @@ function Lettering({ d, fill, stroke, strokeWidth, offset }: {
 }) {
   return (
     <>
-      <path d={d} fill="#062338" fillOpacity="0.55" transform={`translate(${offset} ${offset * 1.3})`} />
-      <path d={d} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" paintOrder="stroke" />
+      <defs>
+        <mask id={id} maskUnits="userSpaceOnUse" x="0" y="0" width="220" height="134">
+          <rect width="220" height="134" fill="#FFFFFF" />
+          <path d={outerContours(d)} fill="#000000" />
+        </mask>
+      </defs>
+      <g mask={`url(#${id})`}>
+        <path d={d} fill="#062338" fillOpacity="0.55" transform={`translate(${offset} ${offset * 1.3})`} />
+      </g>
+      <path
+        d={d}
+        fill={fill}
+        fillOpacity="1"
+        fillRule="nonzero"
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+        paintOrder="stroke"
+      />
     </>
   );
 }
@@ -111,10 +153,10 @@ export function LogoPDVTEC({ className, collapsed = false }: LogoPDVTECProps) {
       className={cn("h-auto w-[150px] shrink-0", className)}
     >
       <Globe id={id} cx={59.5} cy={67} r={58} />
-      <Lettering d={PATH_PDV} fill="#FFFFFF" stroke="#0B3A5C" strokeWidth={0.7} offset={1} />
-      <Lettering d={PATH_TEC} fill="#0284C7" stroke="#062338" strokeWidth={0.7} offset={1} />
-      <Lettering d={PATH_AUTOMACAO} fill="#FFFFFF" stroke="#0B3A5C" strokeWidth={0.35} offset={0.5} />
-      <Lettering d={PATH_COMERCIAL} fill="#0284C7" stroke="#062338" strokeWidth={0.35} offset={0.5} />
+      <Lettering id={`${id}-pdv`} d={PATH_PDV} fill="#FFFFFF" stroke="#0B3A5C" strokeWidth={0.7} offset={1} />
+      <Lettering id={`${id}-tec`} d={PATH_TEC} fill="#0284C7" stroke="#062338" strokeWidth={0.7} offset={1} />
+      <Lettering id={`${id}-aut`} d={PATH_AUTOMACAO} fill="#FFFFFF" stroke="#0B3A5C" strokeWidth={0.35} offset={0.5} />
+      <Lettering id={`${id}-com`} d={PATH_COMERCIAL} fill="#0284C7" stroke="#062338" strokeWidth={0.35} offset={0.5} />
     </svg>
   );
 }

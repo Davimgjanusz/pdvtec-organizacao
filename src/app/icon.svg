@@ -1,21 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 <defs>
-<radialGradient id="pig" cx="32" cy="28.4" r="30" gradientUnits="userSpaceOnUse">
+<radialGradient id="pi-base" cx="32" cy="28.4" r="30" gradientUnits="userSpaceOnUse">
 <stop offset="0" stop-color="#22A6E2"/><stop offset="0.55" stop-color="#0A8ACB"/><stop offset="0.85" stop-color="#0275B7"/><stop offset="1" stop-color="#035A8F"/>
 </radialGradient>
-<linearGradient id="pih" x1="0" y1="2" x2="0" y2="29" gradientUnits="userSpaceOnUse">
+<linearGradient id="pi-gloss" x1="0" y1="2" x2="0" y2="29" gradientUnits="userSpaceOnUse">
 <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.75"/><stop offset="0.45" stop-color="#BFEAFB" stop-opacity="0.35"/><stop offset="1" stop-color="#7DD3FC" stop-opacity="0"/>
 </linearGradient>
-<radialGradient id="pib" cx="32" cy="34.4" r="28.5" gradientTransform="matrix(1 0 0 0.3 0 24.08)" gradientUnits="userSpaceOnUse">
+<radialGradient id="pi-beam" cx="32" cy="34.4" r="28.5" gradientTransform="matrix(1 0 0 0.3 0 24.08)" gradientUnits="userSpaceOnUse">
 <stop offset="0" stop-color="#E0F7FF" stop-opacity="0.85"/><stop offset="0.35" stop-color="#67E8F9" stop-opacity="0.45"/><stop offset="1" stop-color="#38BDF8" stop-opacity="0"/>
 </radialGradient>
-<clipPath id="pic"><circle cx="32" cy="32" r="30"/></clipPath>
+<clipPath id="pi-clip"><circle cx="32" cy="32" r="30"/></clipPath>
 </defs>
-<circle cx="32" cy="32" r="30" fill="url(#pig)"/>
-<g clip-path="url(#pic)">
+<circle cx="32" cy="32" r="30" fill="url(#pi-base)"/>
+<g clip-path="url(#pi-clip)">
 <g fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="0.36"><line x1="32" y1="2" x2="32" y2="62"/><ellipse cx="32" cy="32" rx="8.4" ry="30"/><ellipse cx="32" cy="32" rx="17.4" ry="30"/><ellipse cx="32" cy="32" rx="25.8" ry="30"/><path d="M9.46 12.2Q32 9.2 54.54 12.2"/><path d="M3.79 21.8Q32 18.8 60.21 21.8"/><path d="M2 32Q32 32 62 32"/><path d="M3.79 42.2Q32 45.2 60.21 42.2"/><path d="M9.46 51.8Q32 54.8 54.54 51.8"/></g>
-<ellipse cx="32" cy="34.4" rx="28.5" ry="9" fill="url(#pib)"/>
-<ellipse cx="32" cy="15.5" rx="23.4" ry="13.5" fill="url(#pih)"/>
+<ellipse cx="32" cy="34.4" rx="28.5" ry="9" fill="url(#pi-beam)"/>
+<ellipse cx="32" cy="15.5" rx="23.4" ry="13.5" fill="url(#pi-gloss)"/>
 </g>
 <circle cx="32" cy="32" r="29.82" fill="none" stroke="#035A8F" stroke-width="0.36"/>
 </svg>

@@ -30,6 +30,36 @@ z.setErrorMap((issue, ctx) => {
 
 const digits = (val: string) => val.replace(/\D/g, "");
 
+// =============================================
+// Argumentos de Server Actions (validados no servidor, nunca confiar no cliente)
+// =============================================
+export const recordIdSchema = z.string().uuid("Identificador inválido");
+
+export const proposalStatusSchema = z.enum(["draft", "sent", "approved", "rejected", "cancelled"]);
+
+export const proposalStatusChangeSchema = z.object({
+  id: recordIdSchema,
+  status: proposalStatusSchema,
+  reason: z.string().trim().max(1000, "Motivo muito longo").optional(),
+});
+
+export const contractStatusSchema = z.enum(["active", "pending_renewal", "expired", "cancelled"]);
+
+export const contractStatusChangeSchema = z.object({
+  id: recordIdSchema,
+  status: contractStatusSchema,
+});
+
+/** Caminho relativo dentro do bucket privado (sem "..", barra inicial ou esquema de URL) */
+export const storagePathSchema = z
+  .string()
+  .trim()
+  .min(1, "Documento não informado")
+  .max(500)
+  .refine((path) => !path.startsWith("/") && !path.split("/").includes("..") && !/^[a-z]+:/i.test(path), {
+    message: "Caminho de documento inválido",
+  });
+
 export const clientSchema = z.object({
   corporate_name: z.string().min(1, "Razão social é obrigatória").max(300),
   trade_name: z.string().max(300).nullable().optional(),
@@ -118,6 +148,10 @@ export const contractFormSchema = contractBaseSchema
 
 export type ContractFormInput = z.infer<typeof contractFormSchema>;
 
+export const TASK_COLOR_TAGS = ["default", "blue", "green", "yellow", "orange", "red", "purple", "pink"] as const;
+
+export const taskColorTagSchema = z.enum(TASK_COLOR_TAGS);
+
 export const taskSchema = z.object({
   contract_id: z.string().uuid().nullable().optional(),
   assigned_to: z.string().uuid().nullable().optional(),
@@ -125,6 +159,7 @@ export const taskSchema = z.object({
   description: z.string().max(2000).nullable().optional(),
   column_status: z.enum(["todo", "in_progress", "review", "done"]),
   priority: z.enum(["low", "medium", "high", "urgent"]),
+  color_tag: taskColorTagSchema,
   due_date: z.string().nullable().optional(),
 });
 
@@ -209,3 +244,56 @@ export const taskMovesSchema = z.object({
 
 export type TaskMove = z.infer<typeof taskMoveSchema>;
 export type TaskMovesPayload = z.infer<typeof taskMovesSchema>;
+
+// =============================================
+// Conciliação Financeira
+// =============================================
+export const SPREADSHEET_EXTENSIONS = [".xlsx", ".xls", ".csv"] as const;
+const MAX_SPREADSHEET_BYTES = 10 * 1024 * 1024;
+
+const referenceMonthSchema = z
+  .string()
+  .min(1, "Informe o mês de referência")
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Mês de referência inválido");
+
+const partnerNameSchema = z.string().trim().min(2, "Informe o parceiro").max(200, "Nome muito longo");
+
+export const reconciliationFormSchema = z.object({
+  partner_name: partnerNameSchema,
+  reference_month: referenceMonthSchema,
+  file: z
+    .custom<File>((val) => typeof File !== "undefined" && val instanceof File, {
+      message: "Selecione a planilha do parceiro",
+    })
+    .refine((file) => SPREADSHEET_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext)), {
+      message: "Formato não suportado. Use .xlsx, .xls ou .csv",
+    })
+    .refine((file) => file.size <= MAX_SPREADSHEET_BYTES, { message: "Arquivo excede o limite de 10 MB" }),
+  client_column: z.string().min(1, "Selecione a coluna do cliente"),
+  amount_column: z.string().min(1, "Selecione a coluna do valor"),
+  cnpj_column: z.string().nullable(),
+});
+
+export type ReconciliationFormData = z.infer<typeof reconciliationFormSchema>;
+
+export const reconciliationPayloadSchema = z.object({
+  partner_name: partnerNameSchema,
+  reference_month: referenceMonthSchema,
+  rows: z
+    .array(
+      z.object({
+        client_name: z.string().trim().min(1).max(300),
+        cnpj: z.string().max(30).nullable().optional(),
+        amount: z.number().finite(),
+      })
+    )
+    .min(1, "A planilha não tem linhas com cliente e valor")
+    .max(5000, "A planilha excede o limite de 5.000 linhas"),
+});
+
+export type ReconciliationPayload = z.infer<typeof reconciliationPayloadSchema>;
+
+export const reconciliationKeySchema = z.object({
+  partner_name: partnerNameSchema,
+  reference_month: referenceMonthSchema,
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { hasPermission } from "@/lib/permissions";
@@ -78,6 +78,8 @@ export default function PropostasPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Incrementado para recarregar a lista após criar, editar ou alterar status
+  const [reloadKey, setReloadKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
@@ -86,8 +88,8 @@ export default function PropostasPage() {
   const canEdit = profile ? hasPermission(profile.role, "proposals:edit") : false;
   const canChangeStatus = profile ? hasPermission(profile.role, "proposals:change_status") : false;
 
-  const fetchProposals = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    let ignore = false;
     const supabase = createClient();
 
     let query = supabase
@@ -98,22 +100,24 @@ export default function PropostasPage() {
     if (search) query = query.ilike("title", `%${search}%`);
     if (statusFilter !== "all") query = query.eq("status", statusFilter);
 
-    const { data, error } = await query;
-    if (error) toast.error("Erro ao carregar as propostas.", { id: "carregar-propostas", description: "Tente novamente em instantes." });
-    setProposals((data ?? []) as Proposal[]);
-    setLoading(false);
-  }, [search, statusFilter]);
+    query.then(({ data, error }) => {
+      if (ignore) return;
+      if (error) toast.error("Erro ao carregar as propostas.", { id: "carregar-propostas", description: "Tente novamente em instantes." });
+      setProposals((data ?? []) as Proposal[]);
+      setLoading(false);
+    });
 
-  useEffect(() => {
-    fetchProposals();
-  }, [fetchProposals]);
+    return () => {
+      ignore = true;
+    };
+  }, [search, statusFilter, reloadKey]);
 
   const handleCreate = async (data: ProposalFormData) => {
     const result = await createProposalAction(data);
     if (result.error) return { error: result.error };
     toast.success("Proposta criada com sucesso!");
     setDialogOpen(false);
-    fetchProposals();
+    setReloadKey((k) => k + 1);
     return {};
   };
 
@@ -123,7 +127,7 @@ export default function PropostasPage() {
     if (result.error) return { error: result.error };
     toast.success("Proposta atualizada!");
     setEditingProposal(null);
-    fetchProposals();
+    setReloadKey((k) => k + 1);
     return {};
   };
 
@@ -186,7 +190,7 @@ export default function PropostasPage() {
       router.push(`/contratos?from_proposal=${id}&client_id=${result.clientId}`);
     }
 
-    fetchProposals();
+    setReloadKey((k) => k + 1);
   };
 
   const handleDownloadPdf = async (proposal: Proposal) => {
@@ -231,13 +235,13 @@ export default function PropostasPage() {
           <Input
             placeholder="Buscar por título..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setLoading(true); }}
             className="pl-9"
           />
         </div>
         <OptionSelect
           value={statusFilter}
-          onValueChange={setStatusFilter}
+          onValueChange={(v) => { setStatusFilter(v); setLoading(true); }}
           className="sm:w-[200px]"
           aria-label="Filtrar por status"
           options={[

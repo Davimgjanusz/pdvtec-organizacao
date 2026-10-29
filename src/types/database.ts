@@ -10,6 +10,10 @@ export type TaskColumnStatus = "todo" | "in_progress" | "review" | "done";
 
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
+export type TaskColorTag = "default" | "blue" | "green" | "yellow" | "orange" | "red" | "purple" | "pink";
+
+export type ReconciliationStatus = "matched" | "divergent" | "missing_in_system" | "missing_in_spreadsheet";
+
 export interface Profile {
   id: string;
   full_name: string;
@@ -80,6 +84,7 @@ export interface Task {
   description: string | null;
   column_status: TaskColumnStatus;
   priority: TaskPriority;
+  color_tag: TaskColorTag;
   due_date: string | null;
   position: number;
   started_at: string | null;
@@ -110,6 +115,20 @@ export interface KanbanColumn {
   position: number;
   wip_limit: number | null;
   created_at: string;
+}
+
+export interface FinancialReconciliation {
+  id: string;
+  partner_name: string;
+  reference_month: string;
+  client_name_external: string;
+  contract_id: string | null;
+  expected_amount: number;
+  imported_amount: number;
+  status: ReconciliationStatus;
+  imported_by: string | null;
+  imported_at: string;
+  contract?: Contract;
 }
 
 export interface AuditLog {

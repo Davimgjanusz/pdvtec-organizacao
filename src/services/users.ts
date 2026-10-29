@@ -2,6 +2,7 @@
 
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/audit";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import {
   createUserSchema,
   updateUserRoleSchema,
@@ -18,24 +19,6 @@ export interface ManagedUser {
   role: UserRole;
   created_at: string;
   last_sign_in_at: string | null;
-}
-
-async function requireAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada. Faça login novamente." };
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (profile?.role !== "admin") return { error: "Acesso restrito a administradores." };
-
-  return { user };
 }
 
 async function getServiceClient() {

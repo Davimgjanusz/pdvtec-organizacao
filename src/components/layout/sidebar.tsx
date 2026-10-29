@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Shield,
   UserCog,
+  Scale,
 } from "lucide-react";
 import { cn, getRoleLabel } from "@/lib/utils";
 import { LogoPDVTEC } from "@/components/layout/logo-pdvtec";
@@ -33,6 +34,7 @@ const navItems = [
   { href: "/contratos", label: "Contratos", icon: FolderOpen, module: "contratos" },
   { href: "/tarefas", label: "Tarefas", icon: KanbanSquare, module: "tarefas" },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3, module: "relatorios" },
+  { href: "/dashboard/financeiro/conciliacao", label: "Conciliação", icon: Scale, module: "financeiro" },
   { href: "/admin/usuarios", label: "Usuários", icon: UserCog, module: "admin" },
   { href: "/configuracoes", label: "Configurações", icon: Settings, module: "configuracoes" },
 ];
@@ -67,7 +69,10 @@ export function Sidebar({ role }: SidebarProps) {
 
       <nav className="flex-1 overflow-y-auto p-2 space-y-1" aria-label="Menu principal">
         {filteredItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          // Item mais específico vence: /dashboard não fica ativo dentro de /dashboard/financeiro/...
+          const matches = (href: string) => pathname === href || pathname.startsWith(href + "/");
+          const isActive =
+            matches(item.href) && !filteredItems.some((other) => other.href.length > item.href.length && matches(other.href));
           return (
             <Link
               key={item.href}

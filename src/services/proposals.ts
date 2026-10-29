@@ -1,7 +1,13 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { proposalSchema, type ProposalFormData } from "@/lib/validations/schemas";
+import {
+  proposalSchema,
+  proposalStatusChangeSchema,
+  recordIdSchema,
+  storagePathSchema,
+  type ProposalFormData,
+} from "@/lib/validations/schemas";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
 
@@ -41,6 +47,7 @@ export async function getProposals(filters?: {
 }
 
 export async function getProposal(id: string) {
+  if (!recordIdSchema.safeParse(id).success) throw new Error("Identificador inválido.");
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("proposals")
@@ -86,6 +93,7 @@ export async function createProposalAction(formData: ProposalFormData) {
 }
 
 export async function updateProposalAction(id: string, formData: ProposalFormData) {
+  if (!recordIdSchema.safeParse(id).success) return { error: "Identificador inválido." };
   const parsed = proposalSchema.safeParse(formData);
   if (!parsed.success) {
     return { error: parsed.error.errors[0].message };
@@ -130,6 +138,9 @@ export async function changeProposalStatusAction(
   newStatus: string,
   reason?: string
 ) {
+  const parsed = proposalStatusChangeSchema.safeParse({ id, status: newStatus, reason });
+  if (!parsed.success) return { error: "Status de proposta inválido." };
+
   const supabase = await createClient();
 
   const { data: existing } = await supabase
@@ -168,6 +179,10 @@ export async function changeProposalStatusAction(
 }
 
 export async function saveProposalDocument(proposalId: string, storagePath: string) {
+  if (!recordIdSchema.safeParse(proposalId).success || !storagePathSchema.safeParse(storagePath).success) {
+    return { error: "Documento inválido." };
+  }
+
   const supabase = await createClient();
 
   const { error } = await supabase

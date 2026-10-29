@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  recordIdSchema,
   taskSchema,
   taskMovesSchema,
   type TaskFormData,
@@ -80,6 +81,7 @@ export async function createTaskAction(formData: TaskFormData & { board_id?: str
 }
 
 export async function updateTaskAction(id: string, formData: TaskFormData) {
+  if (!recordIdSchema.safeParse(id).success) return { error: "Identificador inválido." };
   const parsed = taskSchema.safeParse(formData);
   if (!parsed.success) return { error: parsed.error.errors[0].message };
 
@@ -197,6 +199,7 @@ export async function moveTasksAction(payload: TaskMovesPayload) {
 }
 
 export async function deleteTaskAction(id: string) {
+  if (!recordIdSchema.safeParse(id).success) return { error: "Identificador inválido." };
   const supabase = await createClient();
 
   const { data, error } = await supabase.from("tasks").delete().eq("id", id).select("id");

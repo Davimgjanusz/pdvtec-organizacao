@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { clientSchema, type ClientFormData } from "@/lib/validations/schemas";
+import { clientSchema, recordIdSchema, type ClientFormData } from "@/lib/validations/schemas";
 import { normalizeCnpj } from "@/lib/validations/cnpj";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
@@ -27,6 +27,7 @@ export async function getClients(search?: string) {
 }
 
 export async function getClient(id: string) {
+  if (!recordIdSchema.safeParse(id).success) throw new Error("Identificador inválido.");
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("clients")
@@ -87,6 +88,7 @@ export async function createClientAction(formData: ClientFormData) {
 }
 
 export async function updateClientAction(id: string, formData: ClientFormData) {
+  if (!recordIdSchema.safeParse(id).success) return { error: "Identificador inválido." };
   const parsed = clientSchema.safeParse(formData);
   if (!parsed.success) {
     return { error: parsed.error.errors[0].message };
@@ -138,6 +140,7 @@ export async function updateClientAction(id: string, formData: ClientFormData) {
 }
 
 export async function deleteClientAction(id: string) {
+  if (!recordIdSchema.safeParse(id).success) return { error: "Identificador inválido." };
   const supabase = await createClient();
 
   const { error } = await supabase.from("clients").delete().eq("id", id);

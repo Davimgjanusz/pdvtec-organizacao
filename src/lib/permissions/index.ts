@@ -52,6 +52,7 @@ export function canAccessModule(role: UserRole, module: string): boolean {
     case "relatorios": return role === "admin" || role === "comercial";
     case "configuracoes": return role === "admin";
     case "admin": return role === "admin";
+    case "financeiro": return role === "admin";
     default: return false;
   }
 }
